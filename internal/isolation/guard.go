@@ -62,8 +62,10 @@ func checkOverlap(a, b Side, pods []corev1.Pod) error {
 		return &Error{Status: http.StatusUnprocessableEntity, Code: "overlapping_sides",
 			Message: "sides a and b select the same pods", Details: details}
 	}
+	// Compare flattened requirements, so {app: x} and "app In [x]" count as
+	// identical.
 	for _, ns := range a.Namespaces {
-		if slices.Contains(b.Namespaces, ns) && reflect.DeepEqual(labelSelector(a), labelSelector(b)) {
+		if slices.Contains(b.Namespaces, ns) && reflect.DeepEqual(requirements(a), requirements(b)) {
 			return overlap(map[string]any{"namespace": ns})
 		}
 	}
