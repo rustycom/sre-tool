@@ -8,7 +8,8 @@ KUBECTL := kubectl --kubeconfig $(KUBECONFIG_FILE) --context $(KCTX)
 HELM    := helm --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)
 export CLUSTER KCTX KUBECONFIG_FILE
 
-VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
+# --dirty: a rebuild after an uncommitted edit gets a new tag, so deploy rolls it out.
+VERSION ?= $(shell git describe --always --dirty 2>/dev/null || echo dev)
 IMAGE   ?= sre-tool:$(VERSION)
 # Pinned tools live in ./bin (gitignored), so local runs and CI use the same binaries.
 GOLANGCI_LINT_VERSION := 2.14.0

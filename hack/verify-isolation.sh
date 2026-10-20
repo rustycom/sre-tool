@@ -16,6 +16,8 @@ PF_PID=""
 ID=""
 MISMATCHES=0
 MATRIX_PRINTED=0
+SANITY_CREATED=0
+DASHBOARD_REPLICAS="" # set once stage 3 scales, so cleanup restores only what it changed
 
 # The matrix: from-namespace, from-selector, target, and the expected During result.
 # Before and After are always ok.
@@ -75,10 +77,10 @@ cleanup() {
   # On an early failure, show what was probed so far.
   ((MATRIX_PRINTED || ${#RESULT[@]} == 0)) || print_matrix
   stop_pf
-  "${KUBECTL[@]}" -n tenant-b scale deploy/dashboard --replicas=2 >/dev/null
+  [[ -z $DASHBOARD_REPLICAS ]] || "${KUBECTL[@]}" -n tenant-b scale deploy/dashboard --replicas="$DASHBOARD_REPLICAS" >/dev/null
   # A failed run must not leave A and B isolated for the next one.
   [[ -z $ID ]] || "${KUBECTL[@]}" delete netpol -A -l "${MANAGED},sre-tool.io/isolation-id=${ID}" --ignore-not-found >/dev/null
-  "${KUBECTL[@]}" delete namespace "$SANITY_NS" --ignore-not-found --wait=false >/dev/null
+  ((SANITY_CREATED == 0)) || "${KUBECTL[@]}" delete namespace "$SANITY_NS" --ignore-not-found --wait=false >/dev/null
   rm -rf "$TMP"
   exit "$rc"
 }
@@ -94,6 +96,7 @@ require_context
   die "namespace $SANITY_NS already exists; this script owns it"
 # CNI sanity: an allowed probe that a deny-all then blocks. Without this, a CNI that ignores
 # NetworkPolicy would make every "ok" row pass and every "blocked" row look like a tool bug.
+SANITY_CREATED=1
 "${KUBECTL[@]}" apply -f hack/experiments/a1-np-sanity.yaml >/dev/null
 "${KUBECTL[@]}" -n "$SANITY_NS" wait --for=condition=Ready pod --all --timeout=120s >/dev/null
 poll_until "$POLL_TIMEOUT" probe "$SANITY_NS" pod/client server."$SANITY_NS":8080 ok ||
@@ -102,7 +105,9 @@ poll_until "$POLL_TIMEOUT" probe "$SANITY_NS" pod/client server."$SANITY_NS":808
 poll_until "$POLL_TIMEOUT" probe "$SANITY_NS" pod/client server."$SANITY_NS":8080 blocked ||
   die "CNI is not enforcing NetworkPolicy"
 echo "  CNI enforces a deny-all"
-"${KUBECTL[@]}" delete namespace "$SANITY_NS" --wait=false >/dev/null
+# Wait, so an immediate rerun doesn't find it Terminating.
+"${KUBECTL[@]}" delete namespace "$SANITY_NS" --timeout=120s >/dev/null
+SANITY_CREATED=0
 preexisting_rv=$("${KUBECTL[@]}" -n tenant-c get netpol preexisting-allow-all-ingress -o jsonpath='{.metadata.resourceVersion}')
 gw_ip=$("${KUBECTL[@]}" -n tenant-a get pod -l app=gateway -o jsonpath='{.items[0].status.podIP}')
 TO[2]="${gw_ip}:8080"
@@ -110,15 +115,20 @@ start_pf
 
 echo "Stage 1: baseline"
 check_matrix Before
+((MISMATCHES == 0)) || die "baseline does not match; not isolating a broken cluster"
 
 echo "Stage 2: isolate"
 expect_status 201 "$(api POST /v1/isolations "$REQUEST")" "POST $REQUEST"
 ID=$(jq -r .id "$TMP/body")
 poll_until "$POLL_TIMEOUT" probe tenant-a app=gateway dashboard.tenant-b:8080 blocked ||
   die "row 1 not blocked within ${POLL_TIMEOUT}s"
+# Row 2 depends on the other policy, which propagates separately.
+poll_until "$POLL_TIMEOUT" probe tenant-b app=dashboard gateway.tenant-a:8080 blocked ||
+  die "row 2 not blocked within ${POLL_TIMEOUT}s"
 check_matrix During
 
 echo "Stage 3: pod churn"
+DASHBOARD_REPLICAS=$("${KUBECTL[@]}" -n tenant-b get deploy/dashboard -o jsonpath='{.spec.replicas}')
 old_pods=$("${KUBECTL[@]}" -n tenant-b get pod -l app=dashboard -o name)
 "${KUBECTL[@]}" -n tenant-b scale deploy/dashboard --replicas=3 >/dev/null
 "${KUBECTL[@]}" -n tenant-b rollout status deploy/dashboard --timeout=120s >/dev/null
@@ -127,7 +137,10 @@ new_pod=$("${KUBECTL[@]}" -n tenant-b get pod -l app=dashboard -o name | grep -v
 # One probe, not a poll: a new B pod must never get a window to reach A.
 got=$(probe_result tenant-b "$new_pod" gateway.tenant-a:8080)
 [[ $got == blocked ]] || die "new pod $new_pod -> gateway.tenant-a: want blocked, got $got"
-echo "  new pod $new_pod -> gateway.tenant-a: blocked"
+# And the new pod can send at all, or a pod with broken networking would read as blocked.
+got=$(probe_result tenant-b "$new_pod" client.tenant-c:8080)
+[[ $got == ok ]] || die "new pod $new_pod -> client.tenant-c: want ok, got $got"
+echo "  new pod $new_pod -> gateway.tenant-a: blocked; -> client.tenant-c: ok"
 
 echo "Stage 4: idempotency"
 rvs() { "${KUBECTL[@]}" get netpol -A -l "$MANAGED" -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}={.metadata.resourceVersion}{"\n"}{end}' | sort; }
@@ -153,6 +166,8 @@ echo "  deleted: $(jq -c .deleted "$TMP/body")"
 ID=""
 poll_until "$POLL_TIMEOUT" probe tenant-a app=gateway dashboard.tenant-b:8080 ok ||
   die "row 1 not allowed again within ${POLL_TIMEOUT}s"
+poll_until "$POLL_TIMEOUT" probe tenant-b app=dashboard gateway.tenant-a:8080 ok ||
+  die "row 2 not allowed again within ${POLL_TIMEOUT}s"
 check_matrix After
 rv=$("${KUBECTL[@]}" -n tenant-c get netpol preexisting-allow-all-ingress -o jsonpath='{.metadata.resourceVersion}')
 [[ $rv == "$preexisting_rv" ]] || die "tenant-c/preexisting-allow-all-ingress changed: rv $preexisting_rv -> $rv"
