@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/rustycom/sre-tool/internal/config"
+	"github.com/rustycom/sre-tool/internal/hardening"
 	"github.com/rustycom/sre-tool/internal/httpapi"
 	"github.com/rustycom/sre-tool/internal/isolation"
 	"github.com/rustycom/sre-tool/internal/kube"
@@ -80,11 +81,21 @@ func run() error {
 
 	m := metrics.New()
 	svc := isolation.NewService(client, recorder, cfg.PodCIDRs, cfg.ProtectedNamespaces, m.IsolationsActive)
+	hrd := hardening.NewService(client, hardening.ClientValidator{Client: client},
+		hardening.RolloutWaiter{Client: client, Interval: cfg.RolloutPollInterval, Timeout: cfg.RolloutTimeout},
+		recorder, m, hardening.Settings{
+			Defaults:       hardening.DefaultsFrom(cfg),
+			Protected:      cfg.ProtectedNamespaces,
+			MaxNamespaces:  cfg.MaxNamespaces,
+			RolloutTimeout: cfg.RolloutTimeout,
+			ApplyBudget:    cfg.ApplyBudget,
+			Now:            time.Now,
+		})
 	ready := httpapi.NewReadiness(func(ctx context.Context) error {
 		return client.Discovery().RESTClient().Get().AbsPath("/version").Do(ctx).Error()
 	}, time.Now)
 
-	apiSrv := httpapi.NewServer(base, cfg.APIAddr, httpapi.NewAPIHandler(svc, logger, m))
+	apiSrv := httpapi.NewServer(base, cfg.APIAddr, httpapi.NewAPIHandler(svc, hrd, logger, m))
 	opsSrv := httpapi.NewServer(base, cfg.OpsAddr, httpapi.NewOpsHandler(ready, m.Handler()))
 	errc := make(chan error, 2)
 	serve := func(srv *http.Server) {
