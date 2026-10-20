@@ -17,6 +17,7 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -321,6 +322,139 @@ func TestPlanner_ToolOwnDeploymentIsCompliant(t *testing.T) {
 	for _, f := range w.Findings {
 		if f.Severity != "info" {
 			t.Errorf("non-info finding on the tool's own Deployment: %+v", f)
+		}
+	}
+}
+
+// applyChanges is what a successful apply does to a pod spec, as a pure
+// function: it sets each planned field on a copy.
+func applyChanges(t *testing.T, spec corev1.PodSpec, changes []Change) corev1.PodSpec {
+	t.Helper()
+	spec = *spec.DeepCopy()
+	for _, ch := range changes {
+		if ch.Field == FieldSeccomp {
+			if spec.SecurityContext == nil {
+				spec.SecurityContext = &corev1.PodSecurityContext{}
+			}
+			spec.SecurityContext.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileType(ch.To.(string))}
+			continue
+		}
+		c := containerByName(&spec, ch.Container)
+		if c == nil {
+			t.Fatalf("change for unknown container %q", ch.Container)
+		}
+		if c.SecurityContext == nil {
+			c.SecurityContext = &corev1.SecurityContext{}
+		}
+		setQuantity := func(list *corev1.ResourceList, res corev1.ResourceName) {
+			if *list == nil {
+				*list = corev1.ResourceList{}
+			}
+			(*list)[res] = resource.MustParse(ch.To.(string))
+		}
+		switch ch.Field {
+		case FieldAllowPrivEsc:
+			c.SecurityContext.AllowPrivilegeEscalation = new(ch.To.(bool))
+		case FieldRunAsNonRoot:
+			c.SecurityContext.RunAsNonRoot = new(ch.To.(bool))
+		case FieldReadOnlyRootFS:
+			c.SecurityContext.ReadOnlyRootFilesystem = new(ch.To.(bool))
+		case FieldCapabilitiesDrop:
+			if c.SecurityContext.Capabilities == nil {
+				c.SecurityContext.Capabilities = &corev1.Capabilities{}
+			}
+			for _, d := range ch.To.([]string) {
+				c.SecurityContext.Capabilities.Drop = append(c.SecurityContext.Capabilities.Drop, corev1.Capability(d))
+			}
+		case FieldCPURequest:
+			setQuantity(&c.Resources.Requests, corev1.ResourceCPU)
+		case FieldMemoryRequest:
+			setQuantity(&c.Resources.Requests, corev1.ResourceMemory)
+		case FieldMemoryLimit:
+			setQuantity(&c.Resources.Limits, corev1.ResourceMemory)
+		default:
+			t.Fatalf("applyChanges does not know field %s", ch.Field)
+		}
+	}
+	return spec
+}
+
+func containerByName(spec *corev1.PodSpec, name string) *corev1.Container {
+	for _, cs := range [][]corev1.Container{spec.InitContainers, spec.Containers} {
+		for i := range cs {
+			if cs[i].Name == name {
+				return &cs[i]
+			}
+		}
+	}
+	return nil
+}
+
+// TestPlan_SecondPassIsEmpty is tricky test #3. Apply every planned change to
+// a copy of each demo workload, plan again, and require zero patch actions.
+// If a rule's condition does not see its own output as "set" (or wrote a
+// nondeterministic value), every apply would restart everything (I-9).
+func TestPlan_SecondPassIsEmpty(t *testing.T) {
+	in := demoInput(t)
+	// A strict copy of root-nginx, so X1-X3 changes converge too.
+	i := slices.IndexFunc(in.Deployments, func(d appsv1.Deployment) bool { return d.Name == "root-nginx" })
+	strict := *in.Deployments[i].DeepCopy()
+	strict.Name, strict.Annotations = "root-nginx-strict", map[string]string{ProfileAnnotation: StrictProfile}
+	in.Deployments = append(in.Deployments, strict)
+
+	first := BuildPlan(in, testDefaults)
+	if first.Summary.Patch == 0 {
+		t.Fatal("first plan has nothing to patch; the test would prove nothing")
+	}
+	changes := map[string][]Change{}
+	for _, w := range first.Workloads {
+		changes[w.Kind+"/"+w.Namespace+"/"+w.Name] = w.Changes
+	}
+	key := func(kind string, m metav1.ObjectMeta) string { return kind + "/" + m.Namespace + "/" + m.Name }
+	for i := range in.Deployments {
+		d := &in.Deployments[i]
+		d.Spec.Template.Spec = applyChanges(t, d.Spec.Template.Spec, changes[key("Deployment", d.ObjectMeta)])
+	}
+	for i := range in.StatefulSets {
+		s := &in.StatefulSets[i]
+		s.Spec.Template.Spec = applyChanges(t, s.Spec.Template.Spec, changes[key("StatefulSet", s.ObjectMeta)])
+	}
+	for i := range in.DaemonSets {
+		d := &in.DaemonSets[i]
+		d.Spec.Template.Spec = applyChanges(t, d.Spec.Template.Spec, changes[key("DaemonSet", d.ObjectMeta)])
+	}
+	for i := range in.CronJobs {
+		c := &in.CronJobs[i]
+		c.Spec.JobTemplate.Spec.Template.Spec = applyChanges(t, c.Spec.JobTemplate.Spec.Template.Spec, changes[key("CronJob", c.ObjectMeta)])
+	}
+
+	second := BuildPlan(in, testDefaults)
+	if second.Summary.Patch != 0 {
+		for _, w := range second.Workloads {
+			if w.Action == ActionPatch {
+				t.Errorf("second pass still patches %s %s/%s: %+v", w.Kind, w.Namespace, w.Name, w.Changes)
+			}
+		}
+	}
+	// The plan is a fixed point: planning the same input again gives the
+	// same template hashes, so a re-apply would send nothing new.
+	third := BuildPlan(in, testDefaults)
+	for i, w := range second.Workloads {
+		if third.Workloads[i].TemplateHash != w.TemplateHash {
+			t.Errorf("%s %s/%s: template hash changed between identical plans", w.Kind, w.Namespace, w.Name)
+		}
+	}
+	if second.PlanHash != third.PlanHash {
+		t.Error("plan hash changed between identical plans")
+	}
+	// Every workload the first plan patched now reports none, nothing else moved.
+	for i, w := range first.Workloads {
+		want := w.Action
+		if want == ActionPatch {
+			want = ActionNone
+		}
+		if got := second.Workloads[i].Action; got != want {
+			t.Errorf("%s %s/%s: action %s after apply, want %s", w.Kind, w.Namespace, w.Name, got, want)
 		}
 	}
 }

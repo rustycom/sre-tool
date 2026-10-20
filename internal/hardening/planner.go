@@ -32,6 +32,7 @@ type candidate struct {
 	kind   string
 	meta   metav1.ObjectMeta
 	spec   corev1.PodSpec // what the rules look at
+	hashed any            // what the template hash covers (SPEC §7.5)
 	report string         // non-empty: report only, for this reason
 	impact string         // rollout impact if patched
 }
@@ -55,7 +56,8 @@ func BuildPlan(in Input, d Defaults) Plan {
 
 	plan := Plan{Namespaces: namespaces, Workloads: []Workload{}}
 	for _, c := range candidates(in) {
-		w := Workload{Kind: c.kind, Namespace: c.meta.Namespace, Name: c.meta.Name, UID: c.meta.UID, Findings: []Finding{}}
+		w := Workload{Kind: c.kind, Namespace: c.meta.Namespace, Name: c.meta.Name, UID: c.meta.UID,
+			TemplateHash: templateHash(c.hashed), Findings: []Finding{}}
 		owner := metav1.GetControllerOfNoCopy(&c.meta)
 		switch {
 		case skippedNS[w.Namespace]:
@@ -87,6 +89,7 @@ func BuildPlan(in Input, d Defaults) Plan {
 	slices.SortFunc(plan.Workloads, func(a, b Workload) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(kindRank(a.Kind), kindRank(b.Kind)), cmp.Compare(a.Name, b.Name))
 	})
+	plan.PlanHash = planHash(plan.Workloads)
 	for _, w := range plan.Workloads {
 		switch w.Action {
 		case ActionPatch:
@@ -113,37 +116,37 @@ func candidates(in Input) []candidate {
 		if o.Spec.Strategy.Type == appsv1.RecreateDeploymentStrategyType {
 			impact = "recreate: all pods restart at once"
 		}
-		out = append(out, candidate{kind: "Deployment", meta: o.ObjectMeta, spec: o.Spec.Template.Spec, impact: impact})
+		out = append(out, candidate{kind: "Deployment", meta: o.ObjectMeta, spec: o.Spec.Template.Spec, hashed: o.Spec.Template, impact: impact})
 	}
 	for _, o := range in.StatefulSets {
 		impact := "rolling restart"
 		if o.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType {
 			impact = "pending restart: OnDelete, pods change only when deleted"
 		}
-		out = append(out, candidate{kind: "StatefulSet", meta: o.ObjectMeta, spec: o.Spec.Template.Spec, impact: impact})
+		out = append(out, candidate{kind: "StatefulSet", meta: o.ObjectMeta, spec: o.Spec.Template.Spec, hashed: o.Spec.Template, impact: impact})
 	}
 	for _, o := range in.DaemonSets {
 		impact := "rolling restart"
 		if o.Spec.UpdateStrategy.Type == appsv1.OnDeleteDaemonSetStrategyType {
 			impact = "pending restart: OnDelete, pods change only when deleted"
 		}
-		out = append(out, candidate{kind: "DaemonSet", meta: o.ObjectMeta, spec: o.Spec.Template.Spec, impact: impact})
+		out = append(out, candidate{kind: "DaemonSet", meta: o.ObjectMeta, spec: o.Spec.Template.Spec, hashed: o.Spec.Template, impact: impact})
 	}
 	for _, o := range in.CronJobs {
-		out = append(out, candidate{kind: "CronJob", meta: o.ObjectMeta, spec: o.Spec.JobTemplate.Spec.Template.Spec, impact: "future Jobs only; nothing restarts"})
+		out = append(out, candidate{kind: "CronJob", meta: o.ObjectMeta, spec: o.Spec.JobTemplate.Spec.Template.Spec, hashed: o.Spec.JobTemplate.Spec.Template, impact: "future Jobs only; nothing restarts"})
 	}
 	for _, o := range in.Jobs {
 		if owner := metav1.GetControllerOfNoCopy(&o.ObjectMeta); owner != nil && owner.Kind == "CronJob" {
 			continue
 		}
-		out = append(out, candidate{kind: "Job", meta: o.ObjectMeta, spec: o.Spec.Template.Spec,
+		out = append(out, candidate{kind: "Job", meta: o.ObjectMeta, spec: o.Spec.Template.Spec, hashed: o.Spec.Template,
 			report: "Job: pod template is immutable; change whatever creates it"})
 	}
 	for _, o := range in.Pods {
 		if metav1.GetControllerOfNoCopy(&o.ObjectMeta) != nil {
 			continue
 		}
-		out = append(out, candidate{kind: "Pod", meta: o.ObjectMeta, spec: o.Spec,
+		out = append(out, candidate{kind: "Pod", meta: o.ObjectMeta, spec: o.Spec, hashed: o.Spec,
 			report: "bare Pod: spec is immutable; recreate it from a controller"})
 	}
 	return out
