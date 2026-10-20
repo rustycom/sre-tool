@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rustycom/sre-tool/internal/config"
+	"github.com/rustycom/sre-tool/internal/hardening"
 	"github.com/rustycom/sre-tool/internal/isolation"
 	"github.com/rustycom/sre-tool/internal/metrics"
 )
@@ -39,6 +40,23 @@ func (f *fakeIsolations) Delete(context.Context, string) (isolation.DeleteResult
 func (f *fakeIsolations) List(context.Context) ([]isolation.Status, error) { return nil, f.err }
 func (f *fakeIsolations) Get(context.Context, string) (isolation.Status, error) {
 	return isolation.Status{}, f.err
+}
+
+// fakeHardening returns err from every call, or canned results.
+type fakeHardening struct {
+	err     error
+	applied hardening.ApplyResult
+	gotHash string
+	gotNS   []string
+}
+
+func (f *fakeHardening) Plan(_ context.Context, ns []string) (hardening.Plan, error) {
+	f.gotNS = ns
+	return hardening.Plan{PlanHash: "sha256:p", Namespaces: ns}, f.err
+}
+func (f *fakeHardening) Apply(_ context.Context, ns []string, hash string) (hardening.ApplyResult, error) {
+	f.gotNS, f.gotHash = ns, hash
+	return f.applied, f.err
 }
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -86,6 +104,10 @@ func TestHandlers_ErrorShapeAndCodes(t *testing.T) {
 	typed := func(status int, code string) error {
 		return &isolation.Error{Status: status, Code: code, Message: "m", Details: map[string]any{"k": "v"}}
 	}
+	htyped := func(status int, code string) error {
+		return &hardening.Error{Status: status, Code: code, Message: "m", Details: map[string]any{"k": "v"}}
+	}
+	plan, apply := `{"namespaces":["demo"]}`, `{"namespaces":["demo"],"planHash":"sha256:x"}`
 	gr := schema.GroupResource{Group: "networking.k8s.io", Resource: "networkpolicies"}
 	tests := []struct {
 		name          string
@@ -108,6 +130,14 @@ func TestHandlers_ErrorShapeAndCodes(t *testing.T) {
 		{"partial apply", typed(500, "partial_apply"), "POST", "/v1/isolations", briefYAML, 500, "partial_apply", nil},
 		{"not found", typed(404, "not_found"), "GET", "/v1/isolations/abc", "", 404, "not_found", nil},
 		{"unknown route", nil, "GET", "/v2/nope", "", 404, "not_found", nil},
+		{"hardening malformed body", nil, "POST", "/v1/hardening/plan", `{"namespaces":`, 400, "invalid_request", nil},
+		{"hardening unknown field", nil, "POST", "/v1/hardening/apply", `{"namespaces":["demo"],"hash":"x"}`, 400, "invalid_request", nil},
+		{"hardening forbidden namespace", htyped(403, "forbidden_namespace"), "POST", "/v1/hardening/plan", plan, 403, "forbidden_namespace", nil},
+		{"hardening body too large", nil, "POST", "/v1/hardening/plan", strings.Repeat(" ", maxBodyBytes+1), 413, "body_too_large", nil},
+		{"hardening namespace not found", htyped(422, "namespace_not_found"), "POST", "/v1/hardening/plan", plan, 422, "namespace_not_found", nil},
+		{"stale plan", htyped(409, "stale_plan"), "POST", "/v1/hardening/apply", apply, 409, "stale_plan", nil},
+		{"apply in progress", htyped(409, "apply_in_progress"), "POST", "/v1/hardening/apply", apply, 409, "apply_in_progress", nil},
+		{"hardening API failure", apierrors.NewServiceUnavailable("down"), "POST", "/v1/hardening/plan", plan, 500, "internal", true},
 		{"API 503 is retryable", apierrors.NewServiceUnavailable("down"), "GET", "/v1/isolations", "", 500, "internal", true},
 		{"API timeout is retryable", apierrors.NewTimeoutError("slow", 1), "DELETE", "/v1/isolations/abc", "", 500, "internal", true},
 		{"deadline is retryable", context.DeadlineExceeded, "GET", "/v1/isolations/abc", "", 500, "internal", true},
@@ -115,7 +145,7 @@ func TestHandlers_ErrorShapeAndCodes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewAPIHandler(&fakeIsolations{err: tt.err}, discardLogger(), metrics.New())
+			h := NewAPIHandler(&fakeIsolations{err: tt.err}, &fakeHardening{err: tt.err}, discardLogger(), metrics.New())
 			rec := do(h, tt.method, tt.path, tt.body)
 			if rec.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
@@ -146,7 +176,7 @@ func TestHandlers_ErrorShapeAndCodes(t *testing.T) {
 func TestHandlers_YAMLAndJSONBodies(t *testing.T) {
 	jsonBody := `{"isolate":{"a":{"namespace":"tenant-a","selector":{"app":"gateway"}},"b":{"namespace":"tenant-b","selector":{"app":"dashboard"}}}}`
 	f := &fakeIsolations{created: isolation.CreateResult{ID: "x", Created: []string{"tenant-a/p"}}}
-	h := NewAPIHandler(f, discardLogger(), metrics.New())
+	h := NewAPIHandler(f, &fakeHardening{}, discardLogger(), metrics.New())
 	for _, tc := range []struct{ ct, body string }{{"application/yaml", briefYAML}, {"application/json", jsonBody}} {
 		if rec := do(h, "POST", "/v1/isolations", tc.body, "Content-Type", tc.ct); rec.Code != http.StatusCreated {
 			t.Errorf("%s: status = %d, body %s", tc.ct, rec.Code, rec.Body)
@@ -163,9 +193,24 @@ func TestHandlers_YAMLAndJSONBodies(t *testing.T) {
 	}
 }
 
+func TestHandlers_HardeningRoutes(t *testing.T) {
+	f := &fakeHardening{applied: hardening.ApplyResult{Outcome: "halted", Reason: "rollout_failed", Results: []hardening.Result{}}}
+	h := NewAPIHandler(&fakeIsolations{}, f, discardLogger(), metrics.New())
+
+	rec := do(h, "POST", "/v1/hardening/plan", "namespaces: [b, a]\n", "Content-Type", "application/yaml")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"planHash":"sha256:p"`) || !reflect.DeepEqual(f.gotNS, []string{"a", "b"}) {
+		t.Errorf("plan: status %d, body %s, namespaces %v", rec.Code, rec.Body, f.gotNS)
+	}
+	// A halted apply is still a 200: the outcome is data (SPEC §7.7).
+	rec = do(h, "POST", "/v1/hardening/apply", `{"namespaces":["a"],"planHash":"sha256:abc"}`)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"outcome":"halted"`) || f.gotHash != "sha256:abc" {
+		t.Errorf("apply: status %d, body %s, hash %q", rec.Code, rec.Body, f.gotHash)
+	}
+}
+
 func TestHandlers_BodyTooLarge(t *testing.T) {
 	f := &fakeIsolations{}
-	h := NewAPIHandler(f, discardLogger(), metrics.New())
+	h := NewAPIHandler(f, &fakeHardening{}, discardLogger(), metrics.New())
 	// A valid request padded with a YAML comment past the limit.
 	rec := do(h, "POST", "/v1/isolations", briefYAML+"#"+strings.Repeat("x", maxBodyBytes))
 	if rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), "body_too_large") {
@@ -182,7 +227,7 @@ func TestHandlers_BodyTooLarge(t *testing.T) {
 }
 
 func TestMiddleware_RequestIDEchoed(t *testing.T) {
-	h := NewAPIHandler(&fakeIsolations{}, discardLogger(), metrics.New())
+	h := NewAPIHandler(&fakeIsolations{}, &fakeHardening{}, discardLogger(), metrics.New())
 	if got := do(h, "GET", "/v1/isolations", "", "X-Request-ID", "abc-123").Header().Get("X-Request-ID"); got != "abc-123" {
 		t.Errorf("echoed %q, want abc-123", got)
 	}
@@ -246,7 +291,7 @@ var errSkipProbe = errors.New("skip")
 
 func TestMetrics_RouteLabelIsPatternNotPath(t *testing.T) {
 	m := metrics.New()
-	h := NewAPIHandler(&fakeIsolations{}, discardLogger(), m)
+	h := NewAPIHandler(&fakeIsolations{}, &fakeHardening{}, discardLogger(), m)
 	for _, id := range []string{"abc", "def", "ghi"} {
 		do(h, "GET", "/v1/isolations/"+id, "")
 	}

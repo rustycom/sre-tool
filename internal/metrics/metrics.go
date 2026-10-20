@@ -20,6 +20,8 @@ type Metrics struct {
 	HTTPRequests     *prometheus.CounterVec
 	HTTPDuration     *prometheus.HistogramVec
 	IsolationsActive prometheus.Gauge
+	HardeningResults *prometheus.CounterVec
+	RolloutDuration  *prometheus.HistogramVec
 }
 
 // New registers the collectors on a fresh registry, plus the standard Go
@@ -40,8 +42,18 @@ func New() *Metrics {
 			Name: "sre_tool_isolations_active",
 			Help: "Isolations in the cluster, recomputed from a list after every isolation mutation and at startup.",
 		}),
+		HardeningResults: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "sre_tool_hardening_workloads_total",
+			Help: "Workloads handled by hardening apply, by planned action and result.",
+		}, []string{"action", "result"}),
+		RolloutDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "sre_tool_rollout_duration_seconds",
+			Help: "Time from a hardening patch to the end of its rollout wait, by kind and result.",
+			// Rollouts take seconds to minutes; the default buckets stop at 10s.
+			Buckets: []float64{1, 5, 10, 30, 60, 120, 180, 300},
+		}, []string{"kind", "result"}),
 	}
-	m.Registry.MustRegister(m.HTTPRequests, m.HTTPDuration, m.IsolationsActive,
+	m.Registry.MustRegister(m.HTTPRequests, m.HTTPDuration, m.IsolationsActive, m.HardeningResults, m.RolloutDuration,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -50,6 +62,16 @@ func New() *Metrics {
 func (m *Metrics) ObserveRequest(route, method string, code int, d time.Duration) {
 	m.HTTPRequests.WithLabelValues(route, method, strconv.Itoa(code)).Inc()
 	m.HTTPDuration.WithLabelValues(route, method).Observe(d.Seconds())
+}
+
+// ObserveWorkload counts one workload in a hardening apply.
+func (m *Metrics) ObserveWorkload(action, result string) {
+	m.HardeningResults.WithLabelValues(action, result).Inc()
+}
+
+// ObserveRollout records how long one rollout wait took.
+func (m *Metrics) ObserveRollout(kind, result string, d time.Duration) {
+	m.RolloutDuration.WithLabelValues(kind, result).Observe(d.Seconds())
 }
 
 // Handler serves the registry in the Prometheus text format.
