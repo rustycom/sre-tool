@@ -3,6 +3,7 @@ package isolation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"slices"
@@ -410,5 +411,83 @@ func TestDelete_UnknownIDIsIdempotent(t *testing.T) {
 				t.Errorf("recorded writes: %v", w)
 			}
 		})
+	}
+}
+
+func TestGet_ReportsIncompleteAndDrifted(t *testing.T) {
+	ctx := context.Background()
+	client := fixture()
+	svc, _, _ := newService(client)
+	res, err := svc.Create(ctx, briefRequest())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	nameA, nameB := "sre-iso-"+res.ID+"-a", "sre-iso-"+res.ID+"-b"
+
+	st, err := svc.Get(ctx, res.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !st.Complete || st.Drifted || st.Forced || st.ExpectedPolicies != 2 || st.Request == nil {
+		t.Errorf("fresh status = %+v, want complete, not drifted", st)
+	}
+	if want := map[string]int{"a": 1, "b": 1}; !reflect.DeepEqual(st.MatchedPods, want) {
+		t.Errorf("matchedPods = %v, want %v", st.MatchedPods, want)
+	}
+
+	// Delete side a's policy and edit side b's spec.
+	if err := client.NetworkingV1().NetworkPolicies("tenant-a").Delete(ctx, nameA, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	edited := getPolicy(t, client, "tenant-b", nameB)
+	edited.Spec.Ingress[0].From = edited.Spec.Ingress[0].From[:1]
+	if _, err := client.NetworkingV1().NetworkPolicies("tenant-b").Update(ctx, edited, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err = svc.Get(ctx, res.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if st.Complete || !st.Drifted || !reflect.DeepEqual(st.Policies, []string{"tenant-b/" + nameB}) {
+		t.Errorf("status = %+v, want incomplete and drifted with only b", st)
+	}
+
+	_, err = svc.Get(ctx, "0123456789")
+	wantError(t, err, http.StatusNotFound, "not_found")
+}
+
+func TestList_GroupsByID(t *testing.T) {
+	ctx := context.Background()
+	client := fixture(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-d"}})
+	svc, _, _ := newService(client)
+	first := briefRequest()
+	first.Name = "iso-1"
+	second := Request{Name: "iso-2", Isolate: Pair{
+		A: &Side{Namespace: "tenant-c", Selector: map[string]string{"app": "x"}},
+		B: &Side{Namespaces: []string{"tenant-d", "tenant-b"}, Selector: map[string]string{"app": "y"}},
+	}}
+	for _, r := range []Request{second, first} {
+		if _, err := svc.Create(ctx, r); err != nil {
+			t.Fatalf("Create %s: %v", r.Name, err)
+		}
+	}
+	// An unmanaged policy is not an isolation.
+	unmanaged := testPolicy("tenant-a", "other", nil, map[string]string{LabelIsolationID: "iso-3"}, ingress)
+	if _, err := client.NetworkingV1().NetworkPolicies("tenant-a").Create(ctx, &unmanaged, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := svc.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var got []string
+	for _, st := range list {
+		got = append(got, fmt.Sprintf("%s:%d/%d complete=%t", st.ID, len(st.Policies), st.ExpectedPolicies, st.Complete))
+	}
+	want := []string{"iso-1:2/2 complete=true", "iso-2:3/3 complete=true"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("List = %v, want %v", got, want)
 	}
 }
