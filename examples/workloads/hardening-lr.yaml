@@ -1,0 +1,37 @@
+# LimitRange demo (SPEC §12): memory defaults come from the LimitRange at admission,
+# so the planner must skip R2/R3 for lr-app and report "covered at admission".
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hardening-lr
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: memory-defaults
+  namespace: hardening-lr
+spec:
+  limits:
+  - type: Container
+    defaultRequest:
+      memory: 64Mi
+    default:
+      memory: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lr-app
+  namespace: hardening-lr
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: lr-app}
+  template:
+    metadata:
+      labels: {app: lr-app}
+    spec:
+      containers:
+      - name: agnhost
+        image: registry.k8s.io/e2e-test-images/agnhost:2.66.1@sha256:6e2eef87d0dc77e070a7549bc5fdfa290c0fefe3359eb33c2ad1eda692fe66a4
+        args: ["netexec", "--http-port=8080"]
