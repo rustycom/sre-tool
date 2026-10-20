@@ -74,8 +74,19 @@ image: ## Build the container image sre-tool:<git sha>
 kind-load: ## Load the image into the kind cluster
 	kind load docker-image $(IMAGE) --name $(CLUSTER)
 
+# The manifests name sre-tool:dev; one apply with the real tag avoids a second rollout.
+deploy: ## Deploy the tool (image sre-tool:<git sha>) and wait until it is Available
+	$(KUBECTL) kustomize deploy/ | sed 's|image: sre-tool:dev|image: $(IMAGE)|' | $(KUBECTL) apply -f -
+	$(KUBECTL) -n sre-tool rollout status deploy/sre-tool --timeout=120s
+
+undeploy: ## Remove the tool (isolation policies stay in their namespaces)
+	$(KUBECTL) delete -k deploy/ --ignore-not-found
+
+port-forward: ## Expose the tool's API on localhost:8080
+	$(KUBECTL) -n sre-tool port-forward deploy/sre-tool 8080:8080
+
 # Implemented later in Phase 3; failing loudly beats silently doing nothing.
-deploy undeploy port-forward e2e-isolation e2e-rbac: ## (Phase 3)
+e2e-isolation e2e-rbac: ## (Phase 3)
 	@echo "$@: not implemented yet (Phase 3)"; exit 1
 run-local: ## Run the tool on this machine against the kind cluster (API on 127.0.0.1:8080)
 	go run ./cmd/sre-tool --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)

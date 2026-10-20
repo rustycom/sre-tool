@@ -1,0 +1,33 @@
+# Example access for operators (SPEC §10.1). Calling the API means port-forwarding to the
+# pod, so this Role is the authorisation boundary, and the Kubernetes audit log records
+# each port-forward. Bind your own group in place of sre-operators.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: sre-operator
+  namespace: sre-tool
+rules:
+# `kubectl port-forward deploy/sre-tool` resolves the Deployment to a pod first.
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [get]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list]
+- apiGroups: [""]
+  resources: [pods/portforward]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sre-operators
+  namespace: sre-tool
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: sre-operator
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: sre-operators
