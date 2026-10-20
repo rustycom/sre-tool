@@ -43,6 +43,7 @@ type Isolations interface {
 type Hardening interface {
 	Plan(ctx context.Context, namespaces []string) (hardening.Plan, error)
 	Apply(ctx context.Context, namespaces []string, planHash string) (hardening.ApplyResult, error)
+	Undo(ctx context.Context, namespaces []string, dryRun bool) (hardening.ApplyResult, error)
 }
 
 type api struct {
@@ -61,6 +62,7 @@ func NewAPIHandler(iso Isolations, hrd Hardening, logger *slog.Logger, obs Reque
 	mux.HandleFunc("DELETE /v1/isolations/{id}", a.deleteIsolation)
 	mux.HandleFunc("POST /v1/hardening/plan", a.planHardening)
 	mux.HandleFunc("POST /v1/hardening/apply", a.applyHardening)
+	mux.HandleFunc("POST /v1/hardening/undo", a.undoHardening)
 	// Everything else gets the JSON error shape rather than the mux's text.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(a.logger, w, r, &isolation.Error{Status: http.StatusNotFound, Code: "not_found", Message: "no such route"})
@@ -156,15 +158,42 @@ func (a *api) applyHardening(w http.ResponseWriter, r *http.Request) {
 		writeError(a.logger, w, r, err)
 		return
 	}
+	a.logResults(r, "apply", res)
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (a *api) undoHardening(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if err != nil {
+		writeError(a.logger, w, r, err)
+		return
+	}
+	req, err := hardening.DecodeUndo(body)
+	if err != nil {
+		writeError(a.logger, w, r, err)
+		return
+	}
+	res, err := a.hrd.Undo(r.Context(), req.Namespaces, req.DryRun)
+	if err != nil {
+		writeError(a.logger, w, r, err)
+		return
+	}
+	if !req.DryRun {
+		a.logResults(r, "undo", res)
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// logResults logs each workload apply or undo changed or failed on, then the outcome.
+func (a *api) logResults(r *http.Request, action string, res hardening.ApplyResult) {
 	for _, wr := range res.Results {
 		if wr.Status == hardening.StatusApplied || wr.Status == hardening.StatusFailed {
 			a.logger.InfoContext(r.Context(), "hardening "+wr.Status, "request_id", requestID(r.Context()),
-				"namespace", wr.Namespace, "kind", wr.Kind, "name", wr.Name, "action", "apply", "message", wr.Message)
+				"namespace", wr.Namespace, "kind", wr.Kind, "name", wr.Name, "action", action, "message", wr.Message)
 		}
 	}
-	a.logger.InfoContext(r.Context(), "hardening apply finished", "request_id", requestID(r.Context()),
-		"outcome", res.Outcome, "reason", res.Reason, "action", "apply")
-	writeJSON(w, http.StatusOK, res)
+	a.logger.InfoContext(r.Context(), "hardening "+action+" finished", "request_id", requestID(r.Context()),
+		"outcome", res.Outcome, "reason", res.Reason, "action", action)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

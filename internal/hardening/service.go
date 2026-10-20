@@ -46,6 +46,7 @@ const (
 	StatusFailed       = "failed"
 	StatusSkipped      = "skipped"
 	StatusNotAttempted = "not_attempted"
+	StatusDryRun       = "dry_run" // undo with dryRun: true; nothing was written
 )
 
 // ApplyResult is the response of POST /v1/hardening/apply (SPEC §7.7). A
@@ -65,6 +66,9 @@ type Result struct {
 	Status         string  `json:"status"`
 	Message        string  `json:"message,omitempty"`
 	RolloutSeconds float64 `json:"rolloutSeconds"`
+	// Changes is set by undo only: the fields it released, with To null
+	// where the field is now unset.
+	Changes []Change `json:"changes,omitempty"`
 }
 
 // Service plans and applies hardening. It keeps no state between requests
@@ -126,8 +130,7 @@ func (s *Service) Apply(ctx context.Context, namespaces []string, planHash strin
 		return ApplyResult{}, invalid("planHash is required: send the planHash of the plan you reviewed")
 	}
 	if !s.applying.TryLock() {
-		return ApplyResult{}, &Error{Status: http.StatusConflict, Code: "apply_in_progress",
-			Message: "another apply is running; wait for it to finish, then plan again"}
+		return ApplyResult{}, inProgress()
 	}
 	defer s.applying.Unlock()
 
@@ -163,18 +166,17 @@ func (s *Service) Apply(ctx context.Context, namespaces []string, planHash strin
 	return res, nil
 }
 
+// inProgress is the 409 for a second apply or undo while one is running.
+func inProgress() *Error {
+	return &Error{Status: http.StatusConflict, Code: "apply_in_progress",
+		Message: "another apply or undo is running; wait for it to finish, then plan again"}
+}
+
 // applyOne runs the per-workload steps of SPEC §7.7 and fills r. It returns
 // non-nil when apply must stop.
 func (s *Service) applyOne(ctx context.Context, w Workload, in Input, start time.Time, r *Result) *halt {
-	// Checked before anything is touched, so a workload is never cut off
-	// mid-rollout and the response beats the HTTP write timeout.
-	if ctx.Err() != nil {
-		r.Status, r.Message = StatusNotAttempted, "cancelled before this workload: "+ctx.Err().Error()
-		return replan("cancelled")
-	}
-	if left := s.set.ApplyBudget - s.set.Now().Sub(start); left < s.set.RolloutTimeout {
-		r.Status, r.Message = StatusNotAttempted, fmt.Sprintf("%s of the apply budget left, less than one rollout timeout (%s)", left.Round(time.Second), s.set.RolloutTimeout)
-		return replan("apply_budget_exhausted")
+	if h := s.beforeNext(ctx, start, r); h != nil {
+		return h
 	}
 
 	obj, changes, err := s.recheck(ctx, w, in)
@@ -199,8 +201,7 @@ func (s *Service) applyOne(ctx context.Context, w Workload, in Input, start time
 		since := s.set.Now()
 		var applied runtime.Object
 		if applied, err = p.send(ctx, s.client, false); err == nil {
-			obj = applied
-			return s.gate(ctx, w, obj, since, r)
+			return s.gate(ctx, w, applied, since, r, "HardeningApplied", fmt.Sprintf("%d changes; %s", len(w.Changes), w.RolloutImpact))
 		}
 	}
 	r.Status, r.Message = StatusFailed, "apply: "+err.Error()
@@ -213,8 +214,23 @@ func (s *Service) applyOne(ctx context.Context, w Workload, in Input, start time
 	return &halt{reason: "apply_failed", remedy: "nothing was changed on this workload; plan again once the error is fixed"}
 }
 
-// gate waits for the rollout of a workload that was just patched.
-func (s *Service) gate(ctx context.Context, w Workload, obj runtime.Object, since time.Time, r *Result) *halt {
+// beforeNext is checked before a workload is touched, so a workload is never
+// cut off mid-rollout and the response beats the HTTP write timeout.
+func (s *Service) beforeNext(ctx context.Context, start time.Time, r *Result) *halt {
+	if ctx.Err() != nil {
+		r.Status, r.Message = StatusNotAttempted, "cancelled before this workload: "+ctx.Err().Error()
+		return replan("cancelled")
+	}
+	if left := s.set.ApplyBudget - s.set.Now().Sub(start); left < s.set.RolloutTimeout {
+		r.Status, r.Message = StatusNotAttempted, fmt.Sprintf("%s of the apply budget left, less than one rollout timeout (%s)", left.Round(time.Second), s.set.RolloutTimeout)
+		return replan("apply_budget_exhausted")
+	}
+	return nil
+}
+
+// gate waits for the rollout of a workload that was just patched. On success
+// it records okMsg with an okReason event.
+func (s *Service) gate(ctx context.Context, w Workload, obj runtime.Object, since time.Time, r *Result, okReason, okMsg string) *halt {
 	err := s.waiter.Wait(ctx, w.Kind, w.Namespace, w.Name, since)
 	took := s.set.Now().Sub(since)
 	r.RolloutSeconds = took.Seconds()
@@ -240,8 +256,8 @@ func (s *Service) gate(ctx context.Context, w Workload, obj runtime.Object, sinc
 		return &halt{reason: "rollout_failed",
 			remedy: fmt.Sprintf("kubectl -n %s rollout undo %s/%s", w.Namespace, strings.ToLower(w.Kind), w.Name)}
 	}
-	r.Status, r.Message = StatusApplied, fmt.Sprintf("%d changes; %s", len(w.Changes), w.RolloutImpact)
-	s.event(obj, corev1.EventTypeNormal, "HardeningApplied", r.Message)
+	r.Status, r.Message = StatusApplied, okMsg
+	s.event(obj, corev1.EventTypeNormal, okReason, r.Message)
 	return nil
 }
 

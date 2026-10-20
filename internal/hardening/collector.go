@@ -42,17 +42,47 @@ func Decode(body []byte) (Request, error) {
 	if err := yaml.UnmarshalStrict(body, &r); err != nil {
 		return Request{}, invalid("cannot parse the request: %v", err)
 	}
-	slices.Sort(r.Namespaces)
-	r.Namespaces = slices.Compact(r.Namespaces)
-	if len(r.Namespaces) == 0 {
-		return Request{}, invalid("namespaces must list at least one namespace")
+	ns, err := cleanNamespaces(r.Namespaces)
+	if err != nil {
+		return Request{}, err
 	}
-	for _, ns := range r.Namespaces {
+	r.Namespaces = ns
+	return r, nil
+}
+
+// UndoRequest is the body of undo (SPEC §7.9).
+type UndoRequest struct {
+	Namespaces []string `json:"namespaces"`
+	DryRun     bool     `json:"dryRun,omitempty"`
+}
+
+// DecodeUndo parses an undo body the way Decode parses plan and apply.
+func DecodeUndo(body []byte) (UndoRequest, error) {
+	var r UndoRequest
+	if err := yaml.UnmarshalStrict(body, &r); err != nil {
+		return UndoRequest{}, invalid("cannot parse the request: %v", err)
+	}
+	ns, err := cleanNamespaces(r.Namespaces)
+	if err != nil {
+		return UndoRequest{}, err
+	}
+	r.Namespaces = ns
+	return r, nil
+}
+
+// cleanNamespaces sorts and de-duplicates namespaces and checks each name.
+func cleanNamespaces(namespaces []string) ([]string, error) {
+	slices.Sort(namespaces)
+	namespaces = slices.Compact(namespaces)
+	if len(namespaces) == 0 {
+		return nil, invalid("namespaces must list at least one namespace")
+	}
+	for _, ns := range namespaces {
 		if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
-			return Request{}, invalid("namespace %q is not a valid name: %s", ns, strings.Join(errs, "; "))
+			return nil, invalid("namespace %q is not a valid name: %s", ns, strings.Join(errs, "; "))
 		}
 	}
-	return r, nil
+	return namespaces, nil
 }
 
 // Collect checks the namespaces (403 protected, 422 missing; SPEC §7.2) and
