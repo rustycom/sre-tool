@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // fakeValidator fails the dry-run of the workloads named in fail.
@@ -29,7 +32,9 @@ func TestValidatePlan_DryRunsPatchWorkloadsOnly(t *testing.T) {
 		{Kind: "Pod", Name: "bare", Action: ActionReport},
 	}}
 	v := &fakeValidator{fail: map[string]string{"bad": "cannot set allowPrivilegeEscalation to false and privileged to true"}}
-	validatePlan(context.Background(), v, &plan)
+	in := Input{Deployments: []appsv1.Deployment{
+		{ObjectMeta: metav1.ObjectMeta{Name: "good"}}, {ObjectMeta: metav1.ObjectMeta{Name: "bad"}}}}
+	validatePlan(context.Background(), v, &plan, in)
 
 	want := map[string]string{"good": "ok", "bad": "failed: cannot set allowPrivilegeEscalation to false and privileged to true", "done": "", "bare": ""}
 	for _, w := range plan.Workloads {

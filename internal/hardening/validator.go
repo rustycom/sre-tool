@@ -3,6 +3,9 @@ package hardening
 import (
 	"context"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -29,13 +32,13 @@ func (v ClientValidator) DryRun(ctx context.Context, p Patch) error {
 // validatePlan dry-runs every patch workload and records the outcome in
 // dryRun. A failure keeps the action patch, so the operator sees what was
 // intended, but apply refuses that workload (SPEC §7.6).
-func validatePlan(ctx context.Context, v Validator, plan *Plan) {
+func validatePlan(ctx context.Context, v Validator, plan *Plan, in Input) {
 	for i := range plan.Workloads {
 		w := &plan.Workloads[i]
 		if w.Action != ActionPatch {
 			continue
 		}
-		p, err := BuildPatch(*w)
+		p, err := BuildPatch(*w, liveObject(in, w.Kind, w.Namespace, w.Name))
 		if err == nil {
 			err = v.DryRun(ctx, p)
 		}
@@ -44,4 +47,36 @@ func validatePlan(ctx context.Context, v Validator, plan *Plan) {
 			w.DryRun = "failed: " + err.Error()
 		}
 	}
+}
+
+// liveObject finds a patchable workload in the collected input; nil if absent.
+func liveObject(in Input, kind, ns, name string) runtime.Object {
+	match := func(m metav1.ObjectMeta) bool { return m.Namespace == ns && m.Name == name }
+	switch kind {
+	case "Deployment":
+		for i := range in.Deployments {
+			if match(in.Deployments[i].ObjectMeta) {
+				return &in.Deployments[i]
+			}
+		}
+	case "StatefulSet":
+		for i := range in.StatefulSets {
+			if match(in.StatefulSets[i].ObjectMeta) {
+				return &in.StatefulSets[i]
+			}
+		}
+	case "DaemonSet":
+		for i := range in.DaemonSets {
+			if match(in.DaemonSets[i].ObjectMeta) {
+				return &in.DaemonSets[i]
+			}
+		}
+	case "CronJob":
+		for i := range in.CronJobs {
+			if match(in.CronJobs[i].ObjectMeta) {
+				return &in.CronJobs[i]
+			}
+		}
+	}
+	return nil
 }

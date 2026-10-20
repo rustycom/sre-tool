@@ -177,6 +177,12 @@ check "outcome halted at root-nginx" '.outcome == "halted" and .reason == "rollo
 check "the reason names non-root or CreateContainerConfigError" 'r("root-nginx").message | test("non-root|runAsNonRoot|CreateContainerConfigError")'
 echo "  gate failed after $((SECONDS - start))s: $(jq -r '.results[] | select(.name == "root-nginx") | .message' "$TMP/body")"
 echo "  remedy: $(jq -r .remedy "$TMP/body")"
+# The strict template keeps what the first apply set: SSA drops owned fields a later apply
+# leaves out (I-17), so each patch starts from the fields sre-tool owns (ADR-019).
+expect_field deploy/root-nginx '{.spec.template.spec.containers[0].securityContext.runAsNonRoot}' true
+expect_field deploy/root-nginx '{.spec.template.spec.securityContext.seccompProfile.type}' RuntimeDefault
+expect_field deploy/root-nginx '{.spec.template.spec.containers[0].resources.requests.cpu}' 100m
+expect_field deploy/root-nginx '{.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation}' false
 # The old ReplicaSet's pods keep serving: with 2 replicas, maxUnavailable rounds down to 0 (I-20).
 expect_field deploy/root-nginx '{.status.availableReplicas}' 2
 got=$(probe_result $DEMO app=safe-app root-nginx.$DEMO:80)
