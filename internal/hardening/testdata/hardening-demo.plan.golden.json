@@ -1,0 +1,644 @@
+{
+  "planHash": "sha256:01b6e7acf45717124bce9f313ab6026f059a3de9cc51827a8c633b63663e09f8",
+  "namespaces": [
+    "hardening-demo",
+    "hardening-lr"
+  ],
+  "summary": {
+    "patch": 9,
+    "none": 1,
+    "report": 2,
+    "skip": 1
+  },
+  "workloads": [
+    {
+      "kind": "CronJob",
+      "namespace": "hardening-demo",
+      "name": "nightly",
+      "action": "patch",
+      "rolloutImpact": "future Jobs only; nothing restarts",
+      "changes": [
+        {
+          "container": "",
+          "field": "pod.securityContext.seccompProfile.type",
+          "from": null,
+          "to": "RuntimeDefault"
+        },
+        {
+          "container": "job",
+          "field": "container.securityContext.allowPrivilegeEscalation",
+          "from": null,
+          "to": false
+        },
+        {
+          "container": "job",
+          "field": "container.resources.requests.cpu",
+          "from": null,
+          "to": "100m"
+        },
+        {
+          "container": "job",
+          "field": "container.resources.requests.memory",
+          "from": null,
+          "to": "128Mi"
+        },
+        {
+          "container": "job",
+          "field": "container.resources.limits.memory",
+          "from": null,
+          "to": "512Mi"
+        }
+      ],
+      "findings": [
+        {
+          "container": "job",
+          "rule": "R4",
+          "severity": "info",
+          "message": "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes"
+        },
+        {
+          "container": "job",
+          "rule": "X1",
+          "severity": "warning",
+          "message": "runAsNonRoot unset; applied only with harden-profile=strict (fails at start if the image runs as root)"
+        },
+        {
+          "container": "job",
+          "rule": "X2",
+          "severity": "warning",
+          "message": "capabilities.drop empty; [ALL] applied only with harden-profile=strict (some images need capabilities such as SETUID)"
+        },
+        {
+          "container": "job",
+          "rule": "X3",
+          "severity": "warning",
+          "message": "readOnlyRootFilesystem unset; applied only with harden-profile=strict (fails if the app writes to its filesystem)"
+        }
+      ]
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "hardening-demo",
+      "name": "already-hardened",
+      "action": "none",
+      "findings": [
+        {
+          "container": "agnhost",
+          "rule": "R4",
+          "severity": "info",
+          "message": "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes"
+        }
+      ]
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "hardening-demo",
+      "name": "hpa-app",
+      "action": "patch",
+      "rolloutImpact": "rolling restart",
+      "changes": [
+        {
+          "container": "",
+          "field": "pod.securityContext.seccompProfile.type",
+          "from": null,
+          "to": "RuntimeDefault"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.securityContext.allowPrivilegeEscalation",
+          "from": null,
+          "to": false
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.cpu",
+          "from": null,
+          "to": "100m"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.memory",
+          "from": null,
+          "to": "128Mi"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.limits.memory",
+          "from": null,
+          "to": "512Mi"
+        }
+      ],
+      "findings": [
+        {
+          "container": "agnhost",
+          "rule": "R4",
+          "severity": "info",
+          "message": "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X1",
+          "severity": "warning",
+          "message": "runAsNonRoot unset; applied only with harden-profile=strict (fails at start if the image runs as root)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X2",
+          "severity": "warning",
+          "message": "capabilities.drop empty; [ALL] applied only with harden-profile=strict (some images need capabilities such as SETUID)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X3",
+          "severity": "warning",
+          "message": "readOnlyRootFilesystem unset; applied only with harden-profile=strict (fails if the app writes to its filesystem)"
+        },
+        {
+          "container": "",
+          "rule": "HPA",
+          "severity": "warning",
+          "message": "HPA hpa-app begins scaling on cpu utilisation relative to the new request"
+        }
+      ]
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "hardening-demo",
+      "name": "limits-only",
+      "action": "patch",
+      "rolloutImpact": "rolling restart",
+      "changes": [
+        {
+          "container": "",
+          "field": "pod.securityContext.seccompProfile.type",
+          "from": null,
+          "to": "RuntimeDefault"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.securityContext.allowPrivilegeEscalation",
+          "from": null,
+          "to": false
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.cpu",
+          "from": null,
+          "to": "100m"
+        }
+      ],
+      "findings": [
+        {
+          "container": "agnhost",
+          "rule": "R2",
+          "severity": "info",
+          "message": "memory request unset; it defaults to the 64Mi limit at admission, so no lower request is added"
+        },
+        {
+          "container": "agnhost",
+          "rule": "R4",
+          "severity": "info",
+          "message": "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X1",
+          "severity": "warning",
+          "message": "runAsNonRoot unset; applied only with harden-profile=strict (fails at start if the image runs as root)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X2",
+          "severity": "warning",
+          "message": "capabilities.drop empty; [ALL] applied only with harden-profile=strict (some images need capabilities such as SETUID)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X3",
+          "severity": "warning",
+          "message": "readOnlyRootFilesystem unset; applied only with harden-profile=strict (fails if the app writes to its filesystem)"
+        }
+      ]
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "hardening-demo",
+      "name": "privileged-app",
+      "action": "patch",
+      "rolloutImpact": "rolling restart",
+      "changes": [
+        {
+          "container": "",
+          "field": "pod.securityContext.seccompProfile.type",
+          "from": null,
+          "to": "RuntimeDefault"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.cpu",
+          "from": null,
+          "to": "100m"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.memory",
+          "from": null,
+          "to": "128Mi"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.limits.memory",
+          "from": null,
+          "to": "512Mi"
+        }
+      ],
+      "findings": [
+        {
+          "container": "agnhost",
+          "rule": "PRIV",
+          "severity": "warning",
+          "message": "privileged container; reported, never changed"
+        },
+        {
+          "container": "agnhost",
+          "rule": "S2",
+          "severity": "warning",
+          "message": "allowPrivilegeEscalation unset; not set because the API server rejects false with privileged or SYS_ADMIN"
+        },
+        {
+          "container": "agnhost",
+          "rule": "R4",
+          "severity": "info",
+          "message": "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X1",
+          "severity": "warning",
+          "message": "runAsNonRoot unset; applied only with harden-profile=strict (fails at start if the image runs as root)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X2",
+          "severity": "warning",
+          "message": "capabilities.drop empty; [ALL] applied only with harden-profile=strict (some images need capabilities such as SETUID)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X3",
+          "severity": "warning",
+          "message": "readOnlyRootFilesystem unset; applied only with harden-profile=strict (fails if the app writes to its filesystem)"
+        }
+      ]
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "hardening-demo",
+      "name": "root-nginx",
+      "action": "patch",
+      "rolloutImpact": "rolling restart",
+      "changes": [
+        {
+          "container": "",
+          "field": "pod.securityContext.seccompProfile.type",
+          "from": null,
+          "to": "RuntimeDefault"
+        },
+        {
+          "container": "nginx",
+          "field": "container.securityContext.allowPrivilegeEscalation",
+          "from": null,
+          "to": false
+        },
+        {
+          "container": "nginx",
+          "field": "container.resources.requests.cpu",
+          "from": null,
+          "to": "100m"
+        },
+        {
+          "container": "nginx",
+          "field": "container.resources.requests.memory",
+          "from": null,
+          "to": "128Mi"
+        },
+        {
+          "container": "nginx",
+          "field": "container.resources.limits.memory",
+          "from": null,
+          "to": "512Mi"
+        }
+      ],
+      "findings": [
+        {
+          "container": "nginx",
+          "rule": "R4",
+          "severity": "info",
+          "message": "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes"
+        },
+        {
+          "container": "nginx",
+          "rule": "X1",
+          "severity": "warning",
+          "message": "runAsNonRoot unset; applied only with harden-profile=strict (fails at start if the image runs as root)"
+        },
+        {
+          "container": "nginx",
+          "rule": "X2",
+          "severity": "warning",
+          "message": "capabilities.drop empty; [ALL] applied only with harden-profile=strict (some images need capabilities such as SETUID)"
+        },
+        {
+          "container": "nginx",
+          "rule": "X3",
+          "severity": "warning",
+          "message": "readOnlyRootFilesystem unset; applied only with harden-profile=strict (fails if the app writes to its filesystem)"
+        }
+      ]
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "hardening-demo",
+      "name": "safe-app",
+      "action": "patch",
+      "rolloutImpact": "rolling restart",
+      "changes": [
+        {
+          "container": "",
+          "field": "pod.securityContext.seccompProfile.type",
+          "from": null,
+          "to": "RuntimeDefault"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.securityContext.allowPrivilegeEscalation",
+          "from": null,
+          "to": false
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.cpu",
+          "from": null,
+          "to": "100m"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.memory",
+          "from": null,
+          "to": "128Mi"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.limits.memory",
+          "from": null,
+          "to": "512Mi"
+        }
+      ],
+      "findings": [
+        {
+          "container": "agnhost",
+          "rule": "R4",
+          "severity": "info",
+          "message": "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X1",
+          "severity": "warning",
+          "message": "runAsNonRoot unset; applied only with harden-profile=strict (fails at start if the image runs as root)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X2",
+          "severity": "warning",
+          "message": "capabilities.drop empty; [ALL] applied only with harden-profile=strict (some images need capabilities such as SETUID)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X3",
+          "severity": "warning",
+          "message": "readOnlyRootFilesystem unset; applied only with harden-profile=strict (fails if the app writes to its filesystem)"
+        }
+      ]
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "hardening-demo",
+      "name": "skipped-app",
+      "action": "skip",
+      "reason": "annotated sre-tool.io/skip",
+      "findings": []
+    },
+    {
+      "kind": "StatefulSet",
+      "namespace": "hardening-demo",
+      "name": "stateful-app",
+      "action": "patch",
+      "rolloutImpact": "rolling restart",
+      "changes": [
+        {
+          "container": "",
+          "field": "pod.securityContext.seccompProfile.type",
+          "from": null,
+          "to": "RuntimeDefault"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.securityContext.allowPrivilegeEscalation",
+          "from": null,
+          "to": false
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.cpu",
+          "from": null,
+          "to": "100m"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.memory",
+          "from": null,
+          "to": "128Mi"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.limits.memory",
+          "from": null,
+          "to": "512Mi"
+        }
+      ],
+      "findings": [
+        {
+          "container": "agnhost",
+          "rule": "R4",
+          "severity": "info",
+          "message": "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X1",
+          "severity": "warning",
+          "message": "runAsNonRoot unset; applied only with harden-profile=strict (fails at start if the image runs as root)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X2",
+          "severity": "warning",
+          "message": "capabilities.drop empty; [ALL] applied only with harden-profile=strict (some images need capabilities such as SETUID)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X3",
+          "severity": "warning",
+          "message": "readOnlyRootFilesystem unset; applied only with harden-profile=strict (fails if the app writes to its filesystem)"
+        }
+      ]
+    },
+    {
+      "kind": "DaemonSet",
+      "namespace": "hardening-demo",
+      "name": "node-agent",
+      "action": "patch",
+      "rolloutImpact": "rolling restart",
+      "changes": [
+        {
+          "container": "",
+          "field": "pod.securityContext.seccompProfile.type",
+          "from": null,
+          "to": "RuntimeDefault"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.securityContext.allowPrivilegeEscalation",
+          "from": null,
+          "to": false
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.cpu",
+          "from": null,
+          "to": "100m"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.memory",
+          "from": null,
+          "to": "128Mi"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.limits.memory",
+          "from": null,
+          "to": "512Mi"
+        }
+      ],
+      "findings": [
+        {
+          "container": "agnhost",
+          "rule": "R4",
+          "severity": "info",
+          "message": "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X1",
+          "severity": "warning",
+          "message": "runAsNonRoot unset; applied only with harden-profile=strict (fails at start if the image runs as root)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X2",
+          "severity": "warning",
+          "message": "capabilities.drop empty; [ALL] applied only with harden-profile=strict (some images need capabilities such as SETUID)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X3",
+          "severity": "warning",
+          "message": "readOnlyRootFilesystem unset; applied only with harden-profile=strict (fails if the app writes to its filesystem)"
+        }
+      ]
+    },
+    {
+      "kind": "Job",
+      "namespace": "hardening-demo",
+      "name": "once",
+      "action": "report",
+      "reason": "Job: pod template is immutable; change whatever creates it",
+      "findings": []
+    },
+    {
+      "kind": "Pod",
+      "namespace": "hardening-demo",
+      "name": "bare-pod",
+      "action": "report",
+      "reason": "bare Pod: spec is immutable; recreate it from a controller",
+      "findings": []
+    },
+    {
+      "kind": "Deployment",
+      "namespace": "hardening-lr",
+      "name": "lr-app",
+      "action": "patch",
+      "rolloutImpact": "rolling restart",
+      "changes": [
+        {
+          "container": "",
+          "field": "pod.securityContext.seccompProfile.type",
+          "from": null,
+          "to": "RuntimeDefault"
+        },
+        {
+          "container": "agnhost",
+          "field": "container.securityContext.allowPrivilegeEscalation",
+          "from": null,
+          "to": false
+        },
+        {
+          "container": "agnhost",
+          "field": "container.resources.requests.cpu",
+          "from": null,
+          "to": "100m"
+        }
+      ],
+      "findings": [
+        {
+          "container": "agnhost",
+          "rule": "R2",
+          "severity": "info",
+          "message": "memory request covered at admission by LimitRange memory-defaults"
+        },
+        {
+          "container": "agnhost",
+          "rule": "R3",
+          "severity": "info",
+          "message": "memory limit left to LimitRange memory-defaults, which defaults memory at admission"
+        },
+        {
+          "container": "agnhost",
+          "rule": "R4",
+          "severity": "info",
+          "message": "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X1",
+          "severity": "warning",
+          "message": "runAsNonRoot unset; applied only with harden-profile=strict (fails at start if the image runs as root)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X2",
+          "severity": "warning",
+          "message": "capabilities.drop empty; [ALL] applied only with harden-profile=strict (some images need capabilities such as SETUID)"
+        },
+        {
+          "container": "agnhost",
+          "rule": "X3",
+          "severity": "warning",
+          "message": "readOnlyRootFilesystem unset; applied only with harden-profile=strict (fails if the app writes to its filesystem)"
+        }
+      ]
+    }
+  ]
+}
