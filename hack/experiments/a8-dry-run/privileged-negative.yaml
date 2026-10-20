@@ -1,0 +1,24 @@
+# A8 negative: S2 on a privileged container. Expected to be REJECTED (why S2 skips it).
+# A8: the kind of partial apply configuration sre-tool will send (S1, S2, R1-R3) for Deployment/privileged-app.
+# Run: kubectl --context kind-sre-tool apply --server-side --dry-run=server --field-manager=sre-tool -f hack/experiments/a8-dry-run/privileged-negative.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: privileged-app
+  namespace: hardening-demo
+spec:
+  template:
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: agnhost
+        securityContext:
+          allowPrivilegeEscalation: false
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi

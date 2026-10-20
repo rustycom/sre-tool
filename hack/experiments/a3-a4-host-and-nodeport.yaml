@@ -1,0 +1,39 @@
+# A3: a hostNetwork pod on every node (including the control plane), used to probe a
+# gateway pod IP from the local node and from remote nodes during isolation.
+# A4: a NodePort Service for gateway, probed from inside each kind node container.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: np-experiments
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: hostnet
+  namespace: np-experiments
+spec:
+  selector:
+    matchLabels: {app: hostnet}
+  template:
+    metadata:
+      labels: {app: hostnet}
+    spec:
+      hostNetwork: true
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: agnhost
+        image: registry.k8s.io/e2e-test-images/agnhost:2.66.1@sha256:6e2eef87d0dc77e070a7549bc5fdfa290c0fefe3359eb33c2ad1eda692fe66a4
+        args: ["pause"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-nodeport
+  namespace: tenant-a
+spec:
+  type: NodePort
+  selector: {app: gateway}
+  ports:
+  - port: 8080
+    nodePort: 30080
