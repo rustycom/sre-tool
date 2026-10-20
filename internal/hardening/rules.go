@@ -1,12 +1,19 @@
 package hardening
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // ruleContext is what the rules need beyond the pod spec itself.
 type ruleContext struct {
-	strict bool // workload annotated sre-tool.io/harden-profile: strict
+	strict   bool // workload annotated sre-tool.io/harden-profile: strict
+	defaults Defaults
+	// coveredBy maps a resource to the LimitRange that defaults it at
+	// admission in this namespace; R1–R3 leave such resources alone.
+	coveredBy map[corev1.ResourceName]string
 }
 
 // result collects the changes and findings of the rules for one template.
@@ -36,6 +43,10 @@ func templateRules(spec *corev1.PodSpec, ctx ruleContext) result {
 			c := &cs[i]
 			rulePrivileged(&r, c)
 			ruleS2(&r, c)
+			ruleRequest(&r, c, corev1.ResourceCPU, "R1", ctx.defaults.CPURequest, FieldCPURequest, ctx)
+			ruleRequest(&r, c, corev1.ResourceMemory, "R2", ctx.defaults.MemoryRequest, FieldMemoryRequest, ctx)
+			ruleR3(&r, c, ctx)
+			ruleR4(&r, c)
 			ruleX1(&r, c, spec, ctx)
 			ruleX2(&r, c, ctx)
 			ruleX3(&r, c, ctx)
@@ -81,6 +92,54 @@ func ruleS2(r *result, c *corev1.Container) {
 		return
 	}
 	r.change(c.Name, FieldAllowPrivEsc, false)
+}
+
+// ruleRequest is R1 (cpu) and R2 (memory): set a default request only when
+// neither a request nor a limit exists. With a limit, admission already sets
+// the request to the limit (I-11); adding the default would lower it.
+func ruleRequest(r *result, c *corev1.Container, res corev1.ResourceName, rule string, def resource.Quantity, field string, ctx ruleContext) {
+	if _, ok := c.Resources.Requests[res]; ok {
+		return
+	}
+	if lim, ok := c.Resources.Limits[res]; ok {
+		r.finding(c.Name, rule, "info", fmt.Sprintf("%s request unset; it defaults to the %s limit at admission, so no lower request is added", res, lim.String()))
+		return
+	}
+	if lr, ok := ctx.coveredBy[res]; ok {
+		r.finding(c.Name, rule, "info", fmt.Sprintf("%s request covered at admission by LimitRange %s", res, lr))
+		return
+	}
+	r.change(c.Name, field, def.String())
+}
+
+// ruleR3 sets a memory limit no lower than the request. When there is no
+// request, R2 adds the default one (the limit is unset here too), so that
+// default is the request to compare against.
+func ruleR3(r *result, c *corev1.Container, ctx ruleContext) {
+	if _, ok := c.Resources.Limits[corev1.ResourceMemory]; ok {
+		return
+	}
+	if lr, ok := ctx.coveredBy[corev1.ResourceMemory]; ok {
+		r.finding(c.Name, "R3", "info", "memory limit covered at admission by LimitRange "+lr)
+		return
+	}
+	req, ok := c.Resources.Requests[corev1.ResourceMemory]
+	if !ok {
+		req = ctx.defaults.MemoryRequest
+	}
+	limit := ctx.defaults.MemoryLimit
+	if req.Cmp(limit) > 0 {
+		limit = req
+	}
+	r.change(c.Name, FieldMemoryLimit, limit.String())
+}
+
+// ruleR4 never sets a CPU limit (ADR-007: throttling hurts more than it
+// protects); it only says so.
+func ruleR4(r *result, c *corev1.Container) {
+	if _, ok := c.Resources.Limits[corev1.ResourceCPU]; !ok {
+		r.finding(c.Name, "R4", "info", "no CPU limit; not set on purpose, CPU limits throttle even on idle nodes")
+	}
 }
 
 // ruleX1 covers runAsNonRoot, which the kubelet checks only at container start
