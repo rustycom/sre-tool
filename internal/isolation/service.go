@@ -75,6 +75,22 @@ func (s *Service) Create(ctx context.Context, req Request) (CreateResult, error)
 		return CreateResult{}, err
 	}
 
+	desired := BuildPolicies(n, id, s.podCIDRs)
+	byName := map[string]*networkingv1.NetworkPolicy{}
+	for i := range existing {
+		byName[key(&existing[i])] = &existing[i]
+	}
+	// Check ownership of every name before writing anything, so a 409 never
+	// leaves half an isolation behind. This runs before preflight: a policy
+	// squatting on our name is a name_conflict, which force cannot override.
+	for i := range desired {
+		if cur := byName[key(&desired[i])]; cur != nil && !isOwnPolicy(*cur, id) {
+			return CreateResult{}, &Error{Status: http.StatusConflict, Code: "name_conflict",
+				Message: fmt.Sprintf("NetworkPolicy %s already exists and is not managed by isolation %s; refusing to overwrite it", key(cur), id),
+				Details: map[string]any{"policy": key(cur)}}
+		}
+	}
+
 	res := CreateResult{ID: id, Created: []string{}, Repaired: []string{}, Unchanged: []string{}}
 	conflicts := Preflight(n, id, existing, cluster.Pods)
 	forced := len(conflicts) > 0
@@ -85,21 +101,9 @@ func (s *Service) Create(ctx context.Context, req Request) (CreateResult, error)
 		res.Warnings = append(res.Warnings, fmt.Sprintf("forced past conflicting policy %s (side %s); it is still in effect and policies are additive", c.Policy, c.Side))
 	}
 
-	desired := BuildPolicies(n, id, s.podCIDRs)
-	byName := map[string]*networkingv1.NetworkPolicy{}
-	for i := range existing {
-		byName[key(&existing[i])] = &existing[i]
-	}
-	// Check ownership of every name before writing anything, so a 409 never
-	// leaves half an isolation behind.
-	for i := range desired {
-		if forced {
+	if forced {
+		for i := range desired {
 			desired[i].Annotations[AnnotationForced] = "true"
-		}
-		if cur := byName[key(&desired[i])]; cur != nil && !isOwnPolicy(*cur, id) {
-			return CreateResult{}, &Error{Status: http.StatusConflict, Code: "name_conflict",
-				Message: fmt.Sprintf("NetworkPolicy %s already exists and is not managed by isolation %s; refusing to overwrite it", key(cur), id),
-				Details: map[string]any{"policy": key(cur)}}
 		}
 	}
 
@@ -302,25 +306,33 @@ func (s *Service) Delete(ctx context.Context, id string) (DeleteResult, error) {
 		return DeleteResult{}, err
 	}
 	res := DeleteResult{ID: id, Deleted: []string{}}
+	// Keep going past a failure: turning isolation off should remove as
+	// much as it can, and a retry removes the rest.
+	var failed []string
 	for i := range policies {
 		p := &policies[i]
 		uid := p.UID
 		err := s.client.NetworkingV1().NetworkPolicies(p.Namespace).Delete(ctx, p.Name,
 			metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
-		if apierrors.IsNotFound(err) {
+		// NotFound and a failed UID precondition (Conflict) both mean the
+		// object we listed is gone; anything now at that name is not it.
+		if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
 			continue
 		}
 		if err != nil {
-			s.refreshActive(ctx)
-			return DeleteResult{}, fmt.Errorf("delete %s (deleted so far: %v): %w", key(p), res.Deleted, err)
+			failed = append(failed, fmt.Sprintf("%s: %v", key(p), err))
+			continue
 		}
 		res.Deleted = append(res.Deleted, key(p))
 		s.recorder.Eventf(p, nil, corev1.EventTypeNormal, "IsolationRemoved", "Delete", "removed for isolation %s", id)
 	}
+	s.refreshActive(ctx)
+	if len(failed) > 0 {
+		return DeleteResult{}, fmt.Errorf("delete isolation %s: deleted %v, failed %v", id, res.Deleted, failed)
+	}
 	if len(res.Deleted) == 0 {
 		res.Message = fmt.Sprintf("no policies carry isolation ID %s; nothing to delete", id)
 	}
-	s.refreshActive(ctx)
 	return res, nil
 }
 
