@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -116,10 +117,13 @@ func TestUndo_SecondUndoChangesNothing(t *testing.T) {
 	if err != nil || res.Outcome != "complete" {
 		t.Fatalf("second undo: %v %+v", err, res)
 	}
-	for _, r := range res.Results {
-		if len(r.Changes) != 0 {
-			t.Errorf("second undo changed %s: %+v", r.Name, r.Changes)
-		}
+	// The first undo left sre-tool owning nothing, so the API server dropped
+	// its managedFields entry and the second undo finds no workload at all.
+	if len(res.Results) != 0 {
+		t.Errorf("second undo acted on %v, want no workload", statuses(res))
+	}
+	if appliedBySRETool(f.deployment(t, "a").ObjectMeta) {
+		t.Errorf("a still has an sre-tool Apply entry after undo: %+v", f.deployment(t, "a").ManagedFields)
 	}
 	if len(f.waiter.got) != 0 {
 		t.Errorf("second undo waited for rollouts of %v, want none", f.waiter.got)
@@ -179,6 +183,9 @@ func TestUndo_HaltsOnRolloutFailure(t *testing.T) {
 	}
 	if got := f.applied(); !slices.Equal(got, []string{"a", "b"}) {
 		t.Errorf("applied %v, want a and b only", got)
+	}
+	if !strings.Contains(res.Remedy, "rollout undo deployment/b") {
+		t.Errorf("remedy %q, want the rollout undo that restores b's hardened template", res.Remedy)
 	}
 }
 
