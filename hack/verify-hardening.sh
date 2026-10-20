@@ -232,11 +232,13 @@ undone_event() {
   "${KUBECTL[@]}" -n $DEMO get events.events.k8s.io -o json |
     jq -e '.items[] | select(.reason == "HardeningUndone" and .regarding.name == "safe-app")' >/dev/null
 }
+# An apply that leaves a manager owning nothing drops its entry, so a second undo has nothing to act on.
+expect_field deploy/safe-app '{.metadata.managedFields[?(@.manager=="sre-tool")].manager}' ""
 poll_until 30 undone_event || die "no HardeningUndone event on $DEMO/safe-app"
 echo "  ok: Event HardeningUndone on deploy/safe-app"
 before=$(state)
 expect_status 200 "$(post /v1/hardening/undo "$UNDO}")" "undo again"
-check "second undo complete and changed no field" '.outcome == "complete" and ([.results[] | .changes // [] | length] | add // 0) == 0'
+check "second undo finds nothing sre-tool owns" '.outcome == "complete" and .results == []'
 after=$(state)
 [[ $after == "$before" ]] || die "second undo changed generations or ReplicaSets: $(diff <(echo "$before") <(echo "$after"))"
 echo "  generations and ReplicaSet counts unchanged ($(wc -l <<<"$after" | tr -d ' ') values)"
