@@ -4,7 +4,8 @@
 # a2-no-except-variant.yaml applied. Needs a3-a4-host-and-nodeport.yaml and the sample workloads.
 set -euo pipefail
 cd "$(dirname "$0")"
-K=(kubectl --context kind-sre-tool)
+source ../lib.sh
+K=("${KUBECTL[@]}")
 NGINX=nginx:1.30.6@sha256:eb1c896deef834f4e056829fd6dadac8305501f16cc71ba65fb252c8d0aa168e
 
 # pod <namespace> <label selector> <node>: first pod matching on that node.

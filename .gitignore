@@ -8,6 +8,7 @@ coverage.*
 # local / secrets
 .env
 *.kubeconfig
+/.kube/
 kubeconfig*
 
 # interview prep notes produced by /explain (personal, not part of the submission)
