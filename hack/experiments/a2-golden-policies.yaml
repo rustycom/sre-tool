@@ -1,0 +1,48 @@
+# A2, A3, A4, A5, A6: a hand-written copy of the SPEC §6.5 golden policy for the brief's
+# request (tenant-a/app=gateway <-> tenant-b/app=dashboard), both sides. Labels and
+# annotations are trimmed: only the spec matters to the CNI.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: exp-iso-a
+  namespace: tenant-a
+spec:
+  podSelector:
+    matchLabels: {app: gateway}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [tenant-b]}
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: tenant-b}
+      podSelector:
+        matchExpressions:
+        - {key: app, operator: NotIn, values: [dashboard]}
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except: [10.244.0.0/16]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: exp-iso-b
+  namespace: tenant-b
+spec:
+  podSelector:
+    matchLabels: {app: dashboard}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [tenant-a]}
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: tenant-a}
+      podSelector:
+        matchExpressions:
+        - {key: app, operator: NotIn, values: [gateway]}
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except: [10.244.0.0/16]

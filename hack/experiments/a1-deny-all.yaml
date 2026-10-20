@@ -1,0 +1,9 @@
+# A1: deny all ingress to every pod in np-sanity.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all-ingress
+  namespace: np-sanity
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
