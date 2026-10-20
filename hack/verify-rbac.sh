@@ -9,14 +9,21 @@ source hack/lib.sh
 SA=system:serviceaccount:sre-tool:sre-tool
 MISMATCHES=0
 
-# check <yes|no> <verb> <resource[.group]>
+# check <yes|no> <verb> <resource[.group][/subresource]> [who…]: who defaults to the tool's
+# ServiceAccount in every namespace. A subresource must go through --subresource: can-i
+# reads "pods/exec" as the pod named "exec". stderr is kept, so a warning such as an
+# unknown resource type makes the answer differ from a bare yes/no and fails the check.
 check() {
-  local got
-  got=$("${KUBECTL[@]}" auth can-i "$2" "$3" --all-namespaces --as="$SA" 2>/dev/null || true)
-  if [[ $got == "$1" ]]; then
-    printf '  %-4s %-8s %s\n' "$got" "$2" "$3"
+  local want=$1 verb=$2 res=${3%%/*} got
+  local args=("$verb" "$res")
+  [[ $3 != */* ]] || args+=(--subresource="${3#*/}")
+  shift 3
+  if (($#)); then args+=("$@"); else args+=(--all-namespaces --as="$SA"); fi
+  got=$("${KUBECTL[@]}" auth can-i "${args[@]}" 2>&1 || true)
+  if [[ $got == "$want" ]]; then
+    printf '  %-4s %s\n' "$got" "${args[*]}"
   else
-    printf '  %-4s %-8s %-45s <- want %s\n' "$got" "$2" "$3" "$1"
+    printf '  %-4s %s <- want %s\n' "$got" "${args[*]}" "$want"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 }
@@ -40,6 +47,20 @@ check no create pods
 check no delete deployments.apps
 check no patch clusterroles.rbac.authorization.k8s.io
 check no create pods/exec
+# Neighbours of what is granted, so a widened rule shows up here.
+check no get configmaps
+check no update pods
+check no patch replicasets.apps
+check no patch jobs.batch
+check no create rolebindings.rbac.authorization.k8s.io
+
+# The operator Role is the API's access boundary (SPEC §10.1).
+OPERATOR=(-n sre-tool --as=e2e-operator --as-group=sre-operators)
+echo "Operator group sre-operators (namespace sre-tool):"
+check yes create pods/portforward "${OPERATOR[@]}"
+check yes get deployments.apps "${OPERATOR[@]}"
+check no create pods/exec "${OPERATOR[@]}"
+check no get secrets "${OPERATOR[@]}"
 
 ((MISMATCHES == 0)) || die "$MISMATCHES RBAC check(s) did not match"
 echo "PASS: RBAC e2e"
