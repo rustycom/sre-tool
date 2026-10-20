@@ -1,0 +1,22 @@
+# CI runs the same make targets as a local run (docs/VERSIONS.md lists every pin).
+# Actions are pinned by commit SHA: a tag can be moved to other code, a SHA cannot.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.2" # same toolchain as the Dockerfile builder
+          cache: true
+      # gofmt, vet, golangci-lint, go test -race, govulncheck, actionlint.
+      - run: make ci
