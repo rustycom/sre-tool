@@ -47,6 +47,7 @@ type Workload struct {
 	Action        Action    `json:"action"`
 	Reason        string    `json:"reason,omitempty"`        // why report or skip
 	RolloutImpact string    `json:"rolloutImpact,omitempty"` // patch only
+	DryRun        string    `json:"dryRun,omitempty"`        // patch only: "ok" or "failed: <message>"
 	Changes       []Change  `json:"changes,omitempty"`
 	Findings      []Finding `json:"findings"`
 
