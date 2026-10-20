@@ -15,7 +15,9 @@ type Validator interface {
 }
 
 // ClientValidator dry-runs patches against the API server, which runs
-// validation, admission and Pod Security Admission without persisting.
+// validation and admission without persisting. Pod Security Admission only
+// warns on workload objects; it enforces on Pods, so a PSA rejection shows up
+// later, as pods that are never created (the rollout gate's timeout).
 type ClientValidator struct{ Client kubernetes.Interface }
 
 // DryRun sends p with DryRun: [All].

@@ -457,3 +457,37 @@ func TestPlan_SecondPassIsEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanner_RolloutImpact(t *testing.T) {
+	dep := func(name string, mut func(*appsv1.Deployment)) appsv1.Deployment {
+		d := appsv1.Deployment{ObjectMeta: meta(name, nil), Spec: appsv1.DeploymentSpec{Template: template()}}
+		mut(&d)
+		return d
+	}
+	sts := func(name string, mut func(*appsv1.StatefulSet)) appsv1.StatefulSet {
+		s := appsv1.StatefulSet{ObjectMeta: meta(name, nil), Spec: appsv1.StatefulSetSpec{Template: template()}}
+		mut(&s)
+		return s
+	}
+	in := Input{
+		Namespaces: []corev1.Namespace{{ObjectMeta: metav1.ObjectMeta{Name: "ns"}}},
+		Deployments: []appsv1.Deployment{
+			dep("rolling", func(*appsv1.Deployment) {}),
+			dep("recreate", func(d *appsv1.Deployment) { d.Spec.Strategy.Type = appsv1.RecreateDeploymentStrategyType }),
+			dep("paused", func(d *appsv1.Deployment) { d.Spec.Paused = true }),
+		},
+		StatefulSets: []appsv1.StatefulSet{
+			sts("ondelete", func(s *appsv1.StatefulSet) { s.Spec.UpdateStrategy.Type = appsv1.OnDeleteStatefulSetStrategyType }),
+			sts("partitioned", func(s *appsv1.StatefulSet) {
+				s.Spec.UpdateStrategy.RollingUpdate = &appsv1.RollingUpdateStatefulSetStrategy{Partition: new(int32(2))}
+			}),
+		},
+	}
+	want := map[string]string{"rolling": "rolling restart", "recreate": "recreate:", "paused": "pending resume:",
+		"ondelete": "pending restart:", "partitioned": "partial: only ordinals >= 2"}
+	for _, w := range BuildPlan(in, testDefaults).Workloads {
+		if !strings.HasPrefix(w.RolloutImpact, want[w.Name]) {
+			t.Errorf("%s: rolloutImpact %q, want prefix %q", w.Name, w.RolloutImpact, want[w.Name])
+		}
+	}
+}

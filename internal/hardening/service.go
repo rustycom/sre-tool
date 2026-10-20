@@ -224,6 +224,13 @@ func (s *Service) gate(ctx context.Context, w Workload, obj runtime.Object, sinc
 		}
 		s.obs.ObserveRollout(w.Kind, result, took)
 	}
+	if err != nil && ctx.Err() != nil {
+		// The caller went away or the tool is shutting down: the patch is in,
+		// and the rollout may well finish healthy, so do not suggest undo.
+		r.Status, r.Message = StatusFailed, "rollout not verified: "+err.Error()
+		return &halt{reason: "cancelled",
+			remedy: fmt.Sprintf("kubectl -n %s rollout status %s/%s, then plan again", w.Namespace, strings.ToLower(w.Kind), w.Name)}
+	}
 	if err != nil {
 		r.Status, r.Message = StatusFailed, "rollout: "+err.Error()
 		s.event(obj, corev1.EventTypeWarning, "HardeningFailed", r.Message)
