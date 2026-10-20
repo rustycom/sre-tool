@@ -35,25 +35,22 @@ type Request struct {
 }
 
 // Decode parses a JSON or YAML body strictly, as isolation requests are, and
-// returns the namespaces sorted and de-duplicated. maxNamespaces bounds how
-// much one request can list and patch (SPEC §4).
-func Decode(body []byte, maxNamespaces int, needHash bool) (Request, error) {
+// returns the namespaces sorted and de-duplicated. The service checks the
+// --max-namespaces bound and, for apply, the planHash.
+func Decode(body []byte) (Request, error) {
 	var r Request
 	if err := yaml.UnmarshalStrict(body, &r); err != nil {
 		return Request{}, invalid("cannot parse the request: %v", err)
 	}
 	slices.Sort(r.Namespaces)
 	r.Namespaces = slices.Compact(r.Namespaces)
-	if len(r.Namespaces) == 0 || len(r.Namespaces) > maxNamespaces {
-		return Request{}, invalid("namespaces must list 1 to %d namespaces", maxNamespaces)
+	if len(r.Namespaces) == 0 {
+		return Request{}, invalid("namespaces must list at least one namespace")
 	}
 	for _, ns := range r.Namespaces {
 		if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
 			return Request{}, invalid("namespace %q is not a valid name: %s", ns, strings.Join(errs, "; "))
 		}
-	}
-	if needHash && !strings.HasPrefix(r.PlanHash, "sha256:") {
-		return Request{}, invalid("planHash is required: send the planHash of the plan you reviewed")
 	}
 	return r, nil
 }

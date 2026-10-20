@@ -12,25 +12,22 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestDecode_ValidatesNamespacesAndHash(t *testing.T) {
+func TestDecode_ValidatesNamespaces(t *testing.T) {
 	tests := []struct {
-		name     string
-		body     string
-		needHash bool
-		want     []string // nil: want a 400
+		name string
+		body string
+		want []string // nil: want a 400
 	}{
-		{"sorted and de-duplicated", `{"namespaces":["b","a","b"]}`, false, []string{"a", "b"}},
-		{"YAML body", "namespaces: [a]\n", false, []string{"a"}},
-		{"empty list", `{"namespaces":[]}`, false, nil},
-		{"over the maximum", `{"namespaces":["a","b","c"]}`, false, nil},
-		{"invalid name", `{"namespaces":["Not_A_Name"]}`, false, nil},
-		{"unknown field", `{"namespace":["a"]}`, false, nil},
-		{"apply without hash", `{"namespaces":["a"]}`, true, nil},
-		{"apply with hash", `{"namespaces":["a"],"planHash":"sha256:ab"}`, true, []string{"a"}},
+		{"sorted and de-duplicated", `{"namespaces":["b","a","b"]}`, []string{"a", "b"}},
+		{"YAML body", "namespaces: [a]\n", []string{"a"}},
+		{"empty list", `{"namespaces":[]}`, nil},
+		{"invalid name", `{"namespaces":["Not_A_Name"]}`, nil},
+		{"unknown field", `{"namespace":["a"]}`, nil},
+		{"apply body", `{"namespaces":["a"],"planHash":"sha256:ab"}`, []string{"a"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r, err := Decode([]byte(tt.body), 2, tt.needHash)
+			r, err := Decode([]byte(tt.body))
 			var e *Error
 			switch {
 			case tt.want == nil && (!errors.As(err, &e) || e.Status != 400):
