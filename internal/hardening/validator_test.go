@@ -7,20 +7,25 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// fakeValidator fails the dry-run of the workloads named in fail.
+// fakeValidator fails the dry-run of the workloads named in fail, and
+// otherwise returns result[name] as the object after the apply.
 type fakeValidator struct {
-	fail map[string]string // name → error message
-	got  []string
+	fail    map[string]string // name → error message
+	result  map[string]runtime.Object
+	got     []string
+	configs []any // the apply configurations it was sent
 }
 
-func (f *fakeValidator) DryRun(_ context.Context, p Patch) error {
+func (f *fakeValidator) DryRun(_ context.Context, p Patch) (runtime.Object, error) {
 	f.got = append(f.got, p.Name)
+	f.configs = append(f.configs, p.config)
 	if msg, ok := f.fail[p.Name]; ok {
-		return errors.New(msg)
+		return nil, errors.New(msg)
 	}
-	return nil
+	return f.result[p.Name], nil
 }
 
 func TestValidatePlan_DryRunsPatchWorkloadsOnly(t *testing.T) {

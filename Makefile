@@ -100,7 +100,7 @@ port-forward: ## Expose the tool's API on localhost:8080
 e2e-isolation: ## Isolation connectivity matrix against kind (needs deploy)
 	hack/verify-isolation.sh
 
-e2e-hardening: ## Hardening plan/apply, idempotency, stale plan and strict-failure demo (needs deploy)
+e2e-hardening: ## Hardening plan/apply, idempotency, stale plan, strict-failure demo and undo (needs deploy)
 	hack/verify-hardening.sh
 
 e2e-rbac: ## Check what the tool's ServiceAccount may and may not do

@@ -48,6 +48,7 @@ type fakeHardening struct {
 	applied hardening.ApplyResult
 	gotHash string
 	gotNS   []string
+	gotDry  bool
 }
 
 func (f *fakeHardening) Plan(_ context.Context, ns []string) (hardening.Plan, error) {
@@ -56,6 +57,11 @@ func (f *fakeHardening) Plan(_ context.Context, ns []string) (hardening.Plan, er
 }
 func (f *fakeHardening) Apply(_ context.Context, ns []string, hash string) (hardening.ApplyResult, error) {
 	f.gotNS, f.gotHash = ns, hash
+	return f.applied, f.err
+}
+
+func (f *fakeHardening) Undo(_ context.Context, ns []string, dryRun bool) (hardening.ApplyResult, error) {
+	f.gotNS, f.gotDry = ns, dryRun
 	return f.applied, f.err
 }
 
@@ -137,6 +143,8 @@ func TestHandlers_ErrorShapeAndCodes(t *testing.T) {
 		{"hardening namespace not found", htyped(422, "namespace_not_found"), "POST", "/v1/hardening/plan", plan, 422, "namespace_not_found", nil},
 		{"stale plan", htyped(409, "stale_plan"), "POST", "/v1/hardening/apply", apply, 409, "stale_plan", nil},
 		{"apply in progress", htyped(409, "apply_in_progress"), "POST", "/v1/hardening/apply", apply, 409, "apply_in_progress", nil},
+		{"undo unknown field", nil, "POST", "/v1/hardening/undo", `{"namespaces":["demo"],"planHash":"sha256:x"}`, 400, "invalid_request", nil},
+		{"undo in progress", htyped(409, "apply_in_progress"), "POST", "/v1/hardening/undo", plan, 409, "apply_in_progress", nil},
 		{"hardening API failure", apierrors.NewServiceUnavailable("down"), "POST", "/v1/hardening/plan", plan, 500, "internal", true},
 		{"API 503 is retryable", apierrors.NewServiceUnavailable("down"), "GET", "/v1/isolations", "", 500, "internal", true},
 		{"API timeout is retryable", apierrors.NewTimeoutError("slow", 1), "DELETE", "/v1/isolations/abc", "", 500, "internal", true},
@@ -205,6 +213,10 @@ func TestHandlers_HardeningRoutes(t *testing.T) {
 	rec = do(h, "POST", "/v1/hardening/apply", `{"namespaces":["a"],"planHash":"sha256:abc"}`)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"outcome":"halted"`) || f.gotHash != "sha256:abc" {
 		t.Errorf("apply: status %d, body %s, hash %q", rec.Code, rec.Body, f.gotHash)
+	}
+	rec = do(h, "POST", "/v1/hardening/undo", `{"namespaces":["b","a"],"dryRun":true}`)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"outcome":"halted"`) || !f.gotDry || !reflect.DeepEqual(f.gotNS, []string{"a", "b"}) {
+		t.Errorf("undo: status %d, body %s, dryRun %v, namespaces %v", rec.Code, rec.Body, f.gotDry, f.gotNS)
 	}
 }
 

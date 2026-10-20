@@ -384,6 +384,8 @@ func TestService_RejectsBadRequests(t *testing.T) {
 		{"too many namespaces", func() error { _, err := f.svc.Plan(context.Background(), []string{"a", "b", "c"}); return err }, 400, "invalid_request"},
 		{"apply without hash", func() error { _, err := f.svc.Apply(context.Background(), []string{"demo"}, ""); return err }, 400, "invalid_request"},
 		{"protected", func() error { _, err := f.svc.Plan(context.Background(), []string{"kube-system"}); return err }, 403, "forbidden_namespace"},
+		{"undo protected", func() error { _, err := f.svc.Undo(context.Background(), []string{"kube-system"}, false); return err }, 403, "forbidden_namespace"},
+		{"undo too many namespaces", func() error { _, err := f.svc.Undo(context.Background(), []string{"a", "b", "c"}, true); return err }, 400, "invalid_request"},
 		{"missing", func() error { _, err := f.svc.Apply(context.Background(), []string{"nope"}, "sha256:x"); return err }, 422, "namespace_not_found"},
 	}
 	for _, tt := range tests {
