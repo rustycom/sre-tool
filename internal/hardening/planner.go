@@ -114,15 +114,21 @@ func candidates(in Input) []candidate {
 	var out []candidate
 	for _, o := range in.Deployments {
 		impact := "rolling restart"
-		if o.Spec.Strategy.Type == appsv1.RecreateDeploymentStrategyType {
+		switch {
+		case o.Spec.Paused:
+			impact = "pending resume: paused, pods change when the Deployment is resumed"
+		case o.Spec.Strategy.Type == appsv1.RecreateDeploymentStrategyType:
 			impact = "recreate: all pods restart at once"
 		}
 		out = append(out, candidate{kind: "Deployment", meta: o.ObjectMeta, spec: o.Spec.Template.Spec, hashed: o.Spec.Template, impact: impact})
 	}
 	for _, o := range in.StatefulSets {
 		impact := "rolling restart"
-		if o.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType {
+		switch ru := o.Spec.UpdateStrategy.RollingUpdate; {
+		case o.Spec.UpdateStrategy.Type == appsv1.OnDeleteStatefulSetStrategyType:
 			impact = "pending restart: OnDelete, pods change only when deleted"
+		case ru != nil && ru.Partition != nil && *ru.Partition > 0:
+			impact = fmt.Sprintf("partial: only ordinals >= %d update; the rest when the partition changes", *ru.Partition)
 		}
 		out = append(out, candidate{kind: "StatefulSet", meta: o.ObjectMeta, spec: o.Spec.Template.Spec, hashed: o.Spec.Template, impact: impact})
 	}

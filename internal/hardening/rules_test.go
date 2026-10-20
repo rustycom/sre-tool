@@ -205,7 +205,14 @@ func TestRules_InitContainersCoveredEphemeralIgnored(t *testing.T) {
 		s.InitContainers = []corev1.Container{{Name: "init", Image: "img"}}
 		s.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug", Image: "img"}}}
 	})
-	got := changed(templateRules(s, ruleContext{}))
+	r := templateRules(s, ruleContext{})
+	// Init tells the apply configuration which list the container is in.
+	for _, ch := range r.changes {
+		if ch.Init != (ch.Container == "init") {
+			t.Errorf("change %+v: Init = %v", ch, ch.Init)
+		}
+	}
+	got := changed(r)
 	if !slices.Contains(got, "init/"+FieldAllowPrivEsc) {
 		t.Errorf("init container not covered: %v", got)
 	}
