@@ -17,6 +17,12 @@ import (
 // total counts line up. An error means the rollout has failed for good.
 
 func deploymentDone(d *appsv1.Deployment) (bool, error) {
+	// A paused Deployment does not roll out until resumed, and kubectl
+	// refuses to undo it, so waiting would only end in a misleading halt.
+	// Like OnDelete, the plan says "pending resume" and the gate does not wait.
+	if d.Spec.Paused {
+		return true, nil
+	}
 	if d.Generation > d.Status.ObservedGeneration {
 		return false, nil
 	}

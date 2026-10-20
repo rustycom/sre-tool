@@ -85,7 +85,7 @@ func newFixture(t *testing.T) *fixture {
 	f := &fixture{client: fake.NewClientset(objs...), validator: &fakeValidator{}, waiter: &fakeWaiter{},
 		clock: &fakeClock{now: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}, recorder: events.NewFakeRecorder(100), obs: &fakeObserver{}}
 	f.svc = NewService(f.client, f.validator, f.waiter, f.recorder, f.obs, Settings{
-		Defaults:       Defaults{CPURequest: resource.MustParse("100m"), MemoryRequest: resource.MustParse("128Mi"), MemoryLimit: resource.MustParse("512Mi")},
+		Defaults:       testDefaults,
 		Protected:      map[string]bool{"kube-system": true},
 		MaxNamespaces:  2,
 		RolloutTimeout: 3 * time.Minute,
@@ -301,6 +301,26 @@ func TestApply_ContextCancelStopsBeforeNext(t *testing.T) {
 	}
 	if got := f.applied(); !slices.Equal(got, []string{"a"}) {
 		t.Errorf("apply patches sent to %v, want only a", got)
+	}
+}
+
+func TestApply_CancelDuringRolloutDoesNotSuggestUndo(t *testing.T) {
+	f := newFixture(t)
+	hash := f.plan(t).PlanHash
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Shutdown while a's rollout is being watched: the patch is in, the
+	// outcome of the rollout is unknown.
+	f.waiter.hook = func(ctx context.Context, _ string) error { cancel(); return ctx.Err() }
+	res, err := f.svc.Apply(ctx, []string{"demo"}, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"a=failed", "b=not_attempted", "c=not_attempted"}; !slices.Equal(statuses(res), want) || res.Reason != "cancelled" {
+		t.Errorf("statuses = %v reason %s, want %v cancelled", statuses(res), res.Reason, want)
+	}
+	if !strings.Contains(res.Remedy, "rollout status deployment/a") || strings.Contains(res.Remedy, "undo") {
+		t.Errorf("remedy %q, want rollout status and no undo", res.Remedy)
 	}
 }
 

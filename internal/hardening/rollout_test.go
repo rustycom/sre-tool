@@ -45,6 +45,7 @@ func TestRollout_DeploymentEvaluator(t *testing.T) {
 			d.Status.UpdatedReplicas = 1
 			d.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Reason: "ProgressDeadlineExceeded"}}
 		}), "failed"},
+		{"paused does not wait", base(func(d *appsv1.Deployment) { d.Spec.Paused, d.Generation = true, 3 }), "done"},
 		{"progressing normally", base(func(d *appsv1.Deployment) {
 			d.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentProgressing, Reason: "NewReplicaSetAvailable"}}
 		}), "done"},
