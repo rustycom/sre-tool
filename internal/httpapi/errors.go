@@ -10,6 +10,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	"github.com/rustycom/sre-tool/internal/hardening"
 	"github.com/rustycom/sre-tool/internal/isolation"
 )
 
@@ -29,6 +30,7 @@ type errorDetail struct {
 // not to the client.
 func writeError(logger *slog.Logger, w http.ResponseWriter, r *http.Request, err error) {
 	var e *isolation.Error
+	var he *hardening.Error
 	var tooLarge *http.MaxBytesError
 	d := errorDetail{Details: map[string]any{}}
 	status := http.StatusInternalServerError
@@ -37,6 +39,11 @@ func writeError(logger *slog.Logger, w http.ResponseWriter, r *http.Request, err
 		status, d.Code, d.Message = e.Status, e.Code, e.Message
 		if e.Details != nil {
 			d.Details = e.Details
+		}
+	case errors.As(err, &he):
+		status, d.Code, d.Message = he.Status, he.Code, he.Message
+		if he.Details != nil {
+			d.Details = he.Details
 		}
 	case errors.As(err, &tooLarge):
 		status, d.Code = http.StatusRequestEntityTooLarge, "body_too_large"

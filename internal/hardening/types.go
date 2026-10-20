@@ -47,6 +47,7 @@ type Workload struct {
 	Action        Action    `json:"action"`
 	Reason        string    `json:"reason,omitempty"`        // why report or skip
 	RolloutImpact string    `json:"rolloutImpact,omitempty"` // patch only
+	DryRun        string    `json:"dryRun,omitempty"`        // patch only: "ok" or "failed: <message>"
 	Changes       []Change  `json:"changes,omitempty"`
 	Findings      []Finding `json:"findings"`
 
@@ -55,12 +56,14 @@ type Workload struct {
 	TemplateHash string    `json:"-"`
 }
 
-// Change sets one unset field. Container is empty for pod-level fields;
-// container names are unique across containers and initContainers, so the
-// name alone locates the container.
+// Change sets one unset field. Container is empty for pod-level fields.
 type Change struct {
 	Container string `json:"container"`
-	Field     string `json:"field"`
+	// Init marks an init container: the apply configuration must put the
+	// change in the right list. It is not in the response or the plan hash,
+	// because container names are unique across both lists anyway.
+	Init  bool   `json:"-"`
+	Field string `json:"field"`
 	// From is always null: rules fill unset fields only (SPEC §7.3). It is
 	// kept so the response shows the before and after side by side.
 	From any `json:"from"`
@@ -75,7 +78,7 @@ type Finding struct {
 	Message   string `json:"message"`
 }
 
-// Fields a Change can set. Phase 5 builds apply configurations from these.
+// Fields a Change can set; applyconfig.go builds apply configurations from these.
 const (
 	FieldSeccomp          = "pod.securityContext.seccompProfile.type"
 	FieldAllowPrivEsc     = "container.securityContext.allowPrivilegeEscalation"
