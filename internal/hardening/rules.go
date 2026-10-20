@@ -46,9 +46,10 @@ func templateRules(spec *corev1.PodSpec, ctx ruleContext) result {
 		ruleS1(&r, spec)
 	}
 	ruleHostNamespaces(&r, spec)
-	for _, cs := range [][]corev1.Container{spec.InitContainers, spec.Containers} {
+	for list, cs := range [][]corev1.Container{spec.InitContainers, spec.Containers} {
 		for i := range cs {
 			c := &cs[i]
+			first := len(r.changes)
 			rulePrivileged(&r, c)
 			if !windows {
 				ruleS2(&r, c)
@@ -61,6 +62,9 @@ func templateRules(spec *corev1.PodSpec, ctx ruleContext) result {
 			if !windows {
 				ruleX2(&r, c, ctx)
 				ruleX3(&r, c, ctx)
+			}
+			for j := first; j < len(r.changes); j++ {
+				r.changes[j].Init = list == 0
 			}
 		}
 	}
