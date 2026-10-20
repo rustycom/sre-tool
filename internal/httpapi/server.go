@@ -44,7 +44,7 @@ type api struct {
 }
 
 // NewAPIHandler returns the API routes wrapped in the middleware.
-func NewAPIHandler(iso Isolations, logger *slog.Logger) http.Handler {
+func NewAPIHandler(iso Isolations, logger *slog.Logger, obs RequestObserver) http.Handler {
 	a := &api{iso: iso, logger: logger}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/isolations", a.createIsolation)
@@ -55,7 +55,7 @@ func NewAPIHandler(iso Isolations, logger *slog.Logger) http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(a.logger, w, r, &isolation.Error{Status: http.StatusNotFound, Code: "not_found", Message: "no such route"})
 	})
-	return withMiddleware(mux, logger)
+	return withMiddleware(mux, logger, obs)
 }
 
 func (a *api) createIsolation(w http.ResponseWriter, r *http.Request) {

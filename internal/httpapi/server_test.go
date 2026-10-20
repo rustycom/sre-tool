@@ -19,6 +19,7 @@ import (
 
 	"github.com/rustycom/sre-tool/internal/config"
 	"github.com/rustycom/sre-tool/internal/isolation"
+	"github.com/rustycom/sre-tool/internal/metrics"
 )
 
 // fakeIsolations returns err from every call, or canned results.
@@ -114,7 +115,7 @@ func TestHandlers_ErrorShapeAndCodes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewAPIHandler(&fakeIsolations{err: tt.err}, discardLogger())
+			h := NewAPIHandler(&fakeIsolations{err: tt.err}, discardLogger(), metrics.New())
 			rec := do(h, tt.method, tt.path, tt.body)
 			if rec.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
@@ -145,7 +146,7 @@ func TestHandlers_ErrorShapeAndCodes(t *testing.T) {
 func TestHandlers_YAMLAndJSONBodies(t *testing.T) {
 	jsonBody := `{"isolate":{"a":{"namespace":"tenant-a","selector":{"app":"gateway"}},"b":{"namespace":"tenant-b","selector":{"app":"dashboard"}}}}`
 	f := &fakeIsolations{created: isolation.CreateResult{ID: "x", Created: []string{"tenant-a/p"}}}
-	h := NewAPIHandler(f, discardLogger())
+	h := NewAPIHandler(f, discardLogger(), metrics.New())
 	for _, tc := range []struct{ ct, body string }{{"application/yaml", briefYAML}, {"application/json", jsonBody}} {
 		if rec := do(h, "POST", "/v1/isolations", tc.body, "Content-Type", tc.ct); rec.Code != http.StatusCreated {
 			t.Errorf("%s: status = %d, body %s", tc.ct, rec.Code, rec.Body)
@@ -164,7 +165,7 @@ func TestHandlers_YAMLAndJSONBodies(t *testing.T) {
 
 func TestHandlers_BodyTooLarge(t *testing.T) {
 	f := &fakeIsolations{}
-	h := NewAPIHandler(f, discardLogger())
+	h := NewAPIHandler(f, discardLogger(), metrics.New())
 	// A valid request padded with a YAML comment past the limit.
 	rec := do(h, "POST", "/v1/isolations", briefYAML+"#"+strings.Repeat("x", maxBodyBytes))
 	if rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), "body_too_large") {
@@ -181,7 +182,7 @@ func TestHandlers_BodyTooLarge(t *testing.T) {
 }
 
 func TestMiddleware_RequestIDEchoed(t *testing.T) {
-	h := NewAPIHandler(&fakeIsolations{}, discardLogger())
+	h := NewAPIHandler(&fakeIsolations{}, discardLogger(), metrics.New())
 	if got := do(h, "GET", "/v1/isolations", "", "X-Request-ID", "abc-123").Header().Get("X-Request-ID"); got != "abc-123" {
 		t.Errorf("echoed %q, want abc-123", got)
 	}
@@ -195,7 +196,7 @@ func TestMiddleware_RequestIDEchoed(t *testing.T) {
 func TestMiddleware_RecoversPanics(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /boom", func(http.ResponseWriter, *http.Request) { panic("boom") })
-	rec := do(withMiddleware(mux, discardLogger()), "GET", "/boom", "")
+	rec := do(withMiddleware(mux, discardLogger(), metrics.New()), "GET", "/boom", "")
 	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), `"internal"`) {
 		t.Errorf("status = %d, body %s", rec.Code, rec.Body)
 	}
@@ -242,3 +243,39 @@ func TestReadyz_ReflectsAPIServerReachability(t *testing.T) {
 }
 
 var errSkipProbe = errors.New("skip")
+
+func TestMetrics_RouteLabelIsPatternNotPath(t *testing.T) {
+	m := metrics.New()
+	h := NewAPIHandler(&fakeIsolations{}, discardLogger(), m)
+	for _, id := range []string{"abc", "def", "ghi"} {
+		do(h, "GET", "/v1/isolations/"+id, "")
+	}
+	do(h, "GET", "/no/such/path", "")
+
+	families, err := m.Registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]float64{}
+	for _, f := range families {
+		if f.GetName() != "sre_tool_http_requests_total" {
+			continue
+		}
+		for _, metric := range f.GetMetric() {
+			var route, code string
+			for _, l := range metric.GetLabel() {
+				switch l.GetName() {
+				case "route":
+					route = l.GetValue()
+				case "code":
+					code = l.GetValue()
+				}
+			}
+			got[route+" "+code] = metric.GetCounter().GetValue()
+		}
+	}
+	want := map[string]float64{"/v1/isolations/{id} 200": 3, "/ 404": 1}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("requests by route = %v, want %v", got, want)
+	}
+}
