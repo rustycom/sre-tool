@@ -174,7 +174,10 @@ func TestCreate_RefusesToOverwriteUnmanagedPolicy(t *testing.T) {
 	n := Normalize(briefRequest())
 	squatter := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "tenant-b", Name: PolicyName(ID(n), "b")},
-		Spec:       networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"x": "y"}}},
+		// It also selects side b's pods for ingress, so it would conflict in
+		// preflight too; name_conflict must win, because force cannot help.
+		Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: dashLabels},
+			PolicyTypes: []networkingv1.PolicyType{ingress}},
 	}
 	client := fixture(squatter.DeepCopy())
 	svc, _, _ := newService(client)
@@ -489,5 +492,32 @@ func TestList_GroupsByID(t *testing.T) {
 	want := []string{"iso-1:2/2 complete=true", "iso-2:3/3 complete=true"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("List = %v, want %v", got, want)
+	}
+}
+
+func TestDelete_ContinuesPastFailure(t *testing.T) {
+	ctx := context.Background()
+	n := Normalize(briefRequest())
+	id := ID(n)
+	var objs []runtime.Object
+	for _, p := range BuildPolicies(n, id, testCIDRs) {
+		objs = append(objs, p.DeepCopy())
+	}
+	client := fixture(objs...)
+	client.PrependReactor("delete", "networkpolicies", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if a.GetNamespace() == "tenant-a" {
+			return true, nil, errors.New("injected API failure")
+		}
+		return false, nil, nil
+	})
+	svc, _, _ := newService(client)
+
+	_, err := svc.Delete(ctx, id)
+	if err == nil || !strings.Contains(err.Error(), "tenant-a/") {
+		t.Fatalf("err = %v, want the tenant-a failure reported", err)
+	}
+	// Side b's policy was still removed: turning off removes what it can.
+	if _, err := client.NetworkingV1().NetworkPolicies("tenant-b").Get(ctx, PolicyName(id, "b"), metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Errorf("tenant-b policy still exists (err %v)", err)
 	}
 }
