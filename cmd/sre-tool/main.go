@@ -29,6 +29,7 @@ const (
 	readinessInterval = 5 * time.Second
 	shutdownGrace     = 25 * time.Second // SPEC §9: in-flight requests get up to 25s
 	startupAttempts   = 5
+	apiCallTimeout    = 30 * time.Second
 )
 
 func main() {
@@ -53,6 +54,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// A hung API call would hold the isolation mutex until the client gave
+	// up; this bounds every request (watches are not used).
+	restCfg.Timeout = apiCallTimeout
 	client, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {
 		return fmt.Errorf("create client: %w", err)
@@ -65,11 +69,14 @@ func run() error {
 	base, cancelBase := context.WithCancel(context.Background())
 	defer cancelBase()
 
-	recorder, stopEvents, err := kube.NewRecorder(base, client)
+	// The recorder has its own context, stopped after the servers, so events
+	// from requests that finish during the grace period are still sent.
+	evCtx, cancelEvents := context.WithCancel(context.Background())
+	defer cancelEvents()
+	recorder, stopEvents, err := kube.NewRecorder(evCtx, client)
 	if err != nil {
 		return err
 	}
-	defer stopEvents()
 
 	m := metrics.New()
 	svc := isolation.NewService(client, recorder, cfg.PodCIDRs, cfg.ProtectedNamespaces, m.IsolationsActive)
@@ -77,22 +84,23 @@ func run() error {
 		return client.Discovery().RESTClient().Get().AbsPath("/version").Do(ctx).Error()
 	}, time.Now)
 
+	apiSrv := httpapi.NewServer(base, cfg.APIAddr, httpapi.NewAPIHandler(svc, logger, m))
+	opsSrv := httpapi.NewServer(base, cfg.OpsAddr, httpapi.NewOpsHandler(ready, m.Handler()))
+	errc := make(chan error, 2)
+	serve := func(srv *http.Server) {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			errc <- fmt.Errorf("listen on %s: %w", srv.Addr, err)
+		}
+	}
+	// Ops first, so /healthz answers (and /readyz says 503) while the
+	// startup check backs off; a liveness probe must not kill us for waiting.
+	go serve(opsSrv)
 	waitForAPIServer(ctx, ready, logger)
 	if err := svc.RefreshActive(ctx); err != nil {
 		logger.Warn("could not count active isolations at startup", "error", err)
 	}
 	go ready.Run(ctx, readinessInterval)
-
-	apiSrv := httpapi.NewServer(base, cfg.APIAddr, httpapi.NewAPIHandler(svc, logger, m))
-	opsSrv := httpapi.NewServer(base, cfg.OpsAddr, httpapi.NewOpsHandler(ready, m.Handler()))
-	errc := make(chan error, 2)
-	for _, srv := range []*http.Server{apiSrv, opsSrv} {
-		go func() {
-			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
-				errc <- fmt.Errorf("listen on %s: %w", srv.Addr, err)
-			}
-		}()
-	}
+	go serve(apiSrv)
 	logger.Info("started", "version", version, "api_addr", cfg.APIAddr, "ops_addr", cfg.OpsAddr, "ready", ready.Ready())
 
 	var runErr error
@@ -113,6 +121,7 @@ func run() error {
 		}
 	}
 	cancelBase()
+	stopEvents()
 	return runErr
 }
 

@@ -251,6 +251,7 @@ func TestMetrics_RouteLabelIsPatternNotPath(t *testing.T) {
 		do(h, "GET", "/v1/isolations/"+id, "")
 	}
 	do(h, "GET", "/no/such/path", "")
+	do(h, "FOO", "/x", "")
 
 	families, err := m.Registry.Gather()
 	if err != nil {
@@ -262,19 +263,21 @@ func TestMetrics_RouteLabelIsPatternNotPath(t *testing.T) {
 			continue
 		}
 		for _, metric := range f.GetMetric() {
-			var route, code string
+			var route, method, code string
 			for _, l := range metric.GetLabel() {
 				switch l.GetName() {
 				case "route":
 					route = l.GetValue()
+				case "method":
+					method = l.GetValue()
 				case "code":
 					code = l.GetValue()
 				}
 			}
-			got[route+" "+code] = metric.GetCounter().GetValue()
+			got[method+" "+route+" "+code] = metric.GetCounter().GetValue()
 		}
 	}
-	want := map[string]float64{"/v1/isolations/{id} 200": 3, "/ 404": 1}
+	want := map[string]float64{"GET /v1/isolations/{id} 200": 3, "GET / 404": 1, "other / 404": 1}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("requests by route = %v, want %v", got, want)
 	}

@@ -84,7 +84,7 @@ func withMiddleware(next http.Handler, logger *slog.Logger, obs RequestObserver)
 			route, d := routeOf(r.Pattern), time.Since(start)
 			logger.InfoContext(r.Context(), "request", "request_id", id, "method", r.Method, "route", route,
 				"status", rec.status, "duration_ms", d.Milliseconds())
-			obs.ObserveRequest(route, r.Method, rec.status, d)
+			obs.ObserveRequest(route, methodLabel(r.Method), rec.status, d)
 		}()
 		next.ServeHTTP(rec, r)
 	})
@@ -94,4 +94,14 @@ func newRequestID() string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b) // crypto/rand.Read never returns an error (Go 1.24+)
 	return hex.EncodeToString(b)
+}
+
+// methodLabel bounds the method label: any method token is valid HTTP, so
+// unknown ones share one series.
+func methodLabel(m string) string {
+	switch m {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions:
+		return m
+	}
+	return "other"
 }
