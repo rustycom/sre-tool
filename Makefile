@@ -9,12 +9,16 @@ HELM    := helm --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)
 export CLUSTER KCTX KUBECONFIG_FILE
 
 VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
+# Pinned tools live in ./bin (gitignored), so local runs and CI use the same binaries.
 GOLANGCI_LINT_VERSION := 2.14.0
+GOVULNCHECK_VERSION   := 1.8.0
+GOLANGCI_LINT := $(CURDIR)/bin/golangci-lint
+GOVULNCHECK   := $(CURDIR)/bin/govulncheck
 
 WORKLOAD_NAMESPACES := tenant-a tenant-b tenant-c hardening-demo hardening-lr
 
 .DEFAULT_GOAL := help
-.PHONY: help build test lint verify cluster-up cluster-down workloads \
+.PHONY: help build test tools lint verify cluster-up cluster-down workloads \
 	image kind-load deploy undeploy port-forward run-local \
 	e2e e2e-isolation e2e-hardening e2e-rbac ci demo
 
@@ -27,10 +31,17 @@ build: ## Build bin/sre-tool
 test: ## Unit tests
 	go test ./...
 
-lint: ## golangci-lint (warns if the local version differs from the pinned one)
-	@golangci-lint --version | grep -q "version $(GOLANGCI_LINT_VERSION) " || \
-		echo "warning: golangci-lint $(GOLANGCI_LINT_VERSION) is pinned (docs/VERSIONS.md); local is: $$(golangci-lint --version)"
-	golangci-lint run ./...
+tools: $(GOLANGCI_LINT) $(GOVULNCHECK) ## Install the pinned golangci-lint and govulncheck into ./bin
+
+$(GOLANGCI_LINT):
+	GOBIN=$(CURDIR)/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_VERSION)
+$(GOVULNCHECK):
+	GOBIN=$(CURDIR)/bin go install golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION)
+
+lint: $(GOLANGCI_LINT) ## golangci-lint, the pinned ./bin copy (same binary as CI)
+	@$(GOLANGCI_LINT) --version | grep -q "version $(GOLANGCI_LINT_VERSION) " || \
+		{ echo "$(GOLANGCI_LINT) is not $(GOLANGCI_LINT_VERSION); rm it and run make tools"; exit 1; }
+	$(GOLANGCI_LINT) run ./...
 
 verify: ## gofmt check, go vet, golangci-lint, go test -race
 	@test -z "$$(gofmt -l $$(git ls-files --cached --others --exclude-standard '*.go'))" || \
