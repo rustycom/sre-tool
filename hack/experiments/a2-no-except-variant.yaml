@@ -1,0 +1,23 @@
+# A2 control: side a only, with the ipBlock `except` removed. Shows whether the `except`
+# is what keeps B out on this CNI (apply instead of a2-golden-policies.yaml, not with it).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: exp-iso-a-no-except
+  namespace: tenant-a
+spec:
+  podSelector:
+    matchLabels: {app: gateway}
+  policyTypes: [Ingress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchExpressions:
+        - {key: kubernetes.io/metadata.name, operator: NotIn, values: [tenant-b]}
+    - namespaceSelector:
+        matchLabels: {kubernetes.io/metadata.name: tenant-b}
+      podSelector:
+        matchExpressions:
+        - {key: app, operator: NotIn, values: [dashboard]}
+    - ipBlock:
+        cidr: 0.0.0.0/0

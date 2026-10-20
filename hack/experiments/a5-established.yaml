@@ -1,0 +1,18 @@
+# A5: does an already-established TCP connection from B to A survive the isolation policy?
+# a5-server is selected by side a (app=gateway) and echoes everything back on :9000.
+# a5-client is selected by side b (app=dashboard) and writes a timestamp every second over
+# ONE long-lived connection, logging each echoed line. After applying the policy, watch
+# `kubectl logs -f a5-client`: if echoes keep arriving, the open connection survived.
+# The client starts after a short delay so the server is listening; set A5_SERVER first:
+#   A5_SERVER=$(kubectl --context kind-sre-tool -n tenant-a get pod a5-server -o jsonpath='{.status.podIP}')
+apiVersion: v1
+kind: Pod
+metadata:
+  name: a5-server
+  namespace: tenant-a
+  labels: {app: gateway, exp: a5}
+spec:
+  containers:
+  - name: agnhost
+    image: registry.k8s.io/e2e-test-images/agnhost:2.66.1@sha256:6e2eef87d0dc77e070a7549bc5fdfa290c0fefe3359eb33c2ad1eda692fe66a4
+    command: ["socat", "TCP-LISTEN:9000,fork,reuseaddr", "EXEC:cat"]
