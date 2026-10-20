@@ -48,10 +48,16 @@ jobs:
           tar -xzf helm.tgz --strip-components=1 linux-amd64/helm
           sudo install -m 0755 kind kubectl helm /usr/local/bin/
           rm -f kind kubectl helm helm.tgz
+      # A 3-node kind cluster runs out of inotify instances at the runner's defaults
+      # (kind "known issues": too many open files).
+      - run: sudo sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288
       # The same targets, in the same order, as a local end-to-end run.
       - run: make cluster-up workloads image kind-load deploy e2e
       - name: Cluster state on failure
         if: failure()
+        # Each line may fail (no cluster yet, tool not deployed); show what exists anyway.
         run: |
-          kubectl --kubeconfig .kube/kind-sre-tool.kubeconfig --context kind-sre-tool get pods -A -o wide
-          kubectl --kubeconfig .kube/kind-sre-tool.kubeconfig --context kind-sre-tool -n sre-tool logs deploy/sre-tool --tail=200
+          k() { kubectl --kubeconfig .kube/kind-sre-tool.kubeconfig --context kind-sre-tool "$@" || true; }
+          k get pods -A -o wide
+          k get events -A --sort-by=.lastTimestamp | tail -n 100
+          k -n sre-tool logs deploy/sre-tool --tail=200
