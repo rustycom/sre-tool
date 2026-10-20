@@ -2,7 +2,9 @@
 
 Hand-run checks for the design assumptions A1–A9 (SPEC §13.1), against the kind cluster from
 `make cluster-up workloads`. They are not part of the e2e suite; they record *how* each
-assumption was tested so the result can be reproduced. Every command uses `--context kind-sre-tool`.
+assumption was tested so the result can be reproduced. Every command uses `--context kind-sre-tool` and the repo's own kubeconfig
+(`--kubeconfig .kube/kind-sre-tool.kubeconfig`, set in `hack/lib.sh`); the scripts source `hack/lib.sh`.
+For the hand-run commands below, `export KUBECONFIG=$PWD/.kube/kind-sre-tool.kubeconfig` first.
 
 | Assumption | Files | How |
 |---|---|---|

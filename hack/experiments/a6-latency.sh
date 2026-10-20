@@ -4,7 +4,8 @@
 # roughly one probe interval (kubectl exec + 1s connect timeout) of resolution.
 set -euo pipefail
 cd "$(dirname "$0")"
-K=(kubectl --context kind-sre-tool)
+source ../lib.sh
+K=("${KUBECTL[@]}")
 DEADLINE=60 # seconds; a run that exceeds it fails instead of hanging
 
 gw=$("${K[@]}" -n tenant-a get pod -l app=gateway -o jsonpath='{.items[0].metadata.name}')

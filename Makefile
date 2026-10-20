@@ -1,10 +1,12 @@
 # Every kubectl/helm call goes through KUBECTL/HELM, which pin the kind context.
 # Never call kubectl without --context: the author's machine has real clusters.
+# The kubeconfig is the repo's own file (gitignored), so kind never touches ~/.kube/config.
 CLUSTER ?= sre-tool
 KCTX    := kind-$(CLUSTER)
-KUBECTL := kubectl --context $(KCTX)
-HELM    := helm --kube-context $(KCTX)
-export CLUSTER KCTX
+KUBECONFIG_FILE ?= $(CURDIR)/.kube/kind-sre-tool.kubeconfig
+KUBECTL := kubectl --kubeconfig $(KUBECONFIG_FILE) --context $(KCTX)
+HELM    := helm --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)
+export CLUSTER KCTX KUBECONFIG_FILE
 
 VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 GOLANGCI_LINT_VERSION := 2.14.0
