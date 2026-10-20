@@ -2,9 +2,13 @@ package isolation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -318,4 +322,108 @@ func (s *Service) Delete(ctx context.Context, id string) (DeleteResult, error) {
 	}
 	s.refreshActive(ctx)
 	return res, nil
+}
+
+// Status is one isolation as read back from the cluster (FR-ISO-08).
+type Status struct {
+	ID               string         `json:"id"`
+	Request          *Request       `json:"request"` // nil when the annotation is unreadable
+	Policies         []string       `json:"policies"`
+	ExpectedPolicies int            `json:"expectedPolicies"`
+	Complete         bool           `json:"complete"`
+	Drifted          bool           `json:"drifted"`
+	Forced           bool           `json:"forced"`
+	MatchedPods      map[string]int `json:"matchedPods"`
+	CreatedAt        metav1.Time    `json:"createdAt"`
+}
+
+// List returns every isolation in the cluster, sorted by ID.
+func (s *Service) List(ctx context.Context) ([]Status, error) {
+	list, err := s.client.NetworkingV1().NetworkPolicies(metav1.NamespaceAll).List(ctx,
+		metav1.ListOptions{LabelSelector: LabelManagedBy + "=" + ManagedByValue + "," + LabelIsolationID})
+	if err != nil {
+		return nil, fmt.Errorf("list managed policies: %w", err)
+	}
+	byID := map[string][]networkingv1.NetworkPolicy{}
+	for _, p := range list.Items {
+		id := p.Labels[LabelIsolationID]
+		byID[id] = append(byID[id], p)
+	}
+	out := []Status{}
+	for _, id := range slices.Sorted(maps.Keys(byID)) {
+		st, err := s.status(ctx, id, byID[id])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, nil
+}
+
+// Get returns one isolation, or 404 not_found when no policy carries the ID.
+func (s *Service) Get(ctx context.Context, id string) (Status, error) {
+	policies, err := s.listManaged(ctx, id)
+	if err != nil {
+		return Status{}, err
+	}
+	if len(policies) == 0 {
+		return Status{}, &Error{Status: http.StatusNotFound, Code: "not_found",
+			Message: fmt.Sprintf("no policies carry isolation ID %s", id), Details: map[string]any{"id": id}}
+	}
+	return s.status(ctx, id, policies)
+}
+
+// status compares the policies found with the ones the stored request would
+// generate today. A missing policy makes it incomplete; a changed spec, or an
+// unreadable or inconsistent request annotation, makes it drifted.
+func (s *Service) status(ctx context.Context, id string, policies []networkingv1.NetworkPolicy) (Status, error) {
+	slices.SortFunc(policies, func(x, y networkingv1.NetworkPolicy) int { return strings.Compare(key(&x), key(&y)) })
+	first := policies[0]
+	st := Status{ID: id, Policies: []string{}, MatchedPods: map[string]int{"a": 0, "b": 0}, CreatedAt: first.CreationTimestamp}
+	st.ExpectedPolicies, _ = strconv.Atoi(first.Annotations[AnnotationExpectedPolicy])
+	st.Complete = len(policies) == st.ExpectedPolicies
+
+	var req Request
+	if err := json.Unmarshal([]byte(first.Annotations[AnnotationRequest]), &req); err == nil && req.Isolate.A != nil && req.Isolate.B != nil {
+		st.Request = &req
+	}
+	desired := map[string]networkingv1.NetworkPolicySpec{}
+	if st.Request != nil {
+		for _, d := range BuildPolicies(req, id, s.podCIDRs) {
+			desired[key(&d)] = d.Spec
+		}
+	}
+	for _, p := range policies {
+		st.Policies = append(st.Policies, key(&p))
+		st.Forced = st.Forced || p.Annotations[AnnotationForced] == "true"
+		if p.CreationTimestamp.Before(&st.CreatedAt) {
+			st.CreatedAt = p.CreationTimestamp
+		}
+		want, ok := desired[key(&p)]
+		if !ok || p.Annotations[AnnotationRequest] != first.Annotations[AnnotationRequest] || !equality.Semantic.DeepEqual(p.Spec, want) {
+			st.Drifted = true
+		}
+	}
+	if st.Request == nil {
+		return st, nil
+	}
+	for side, sd := range map[string]*Side{"a": req.Isolate.A, "b": req.Isolate.B} {
+		sel, err := metav1.LabelSelectorAsSelector(labelSelector(*sd))
+		if err != nil {
+			st.Drifted = true
+			continue
+		}
+		for _, ns := range sd.Namespaces {
+			pods, err := s.client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: sel.String()})
+			if err != nil {
+				return Status{}, fmt.Errorf("list pods of isolation %s in %s: %w", id, ns, err)
+			}
+			for _, p := range pods.Items {
+				if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
+					st.MatchedPods[side]++
+				}
+			}
+		}
+	}
+	return st, nil
 }
