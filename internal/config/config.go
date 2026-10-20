@@ -16,9 +16,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// maxApplyBudget is the API server's WriteTimeout (SPEC §8). An apply budget
-// at or above it would let the HTTP response time out while apply continues.
-const maxApplyBudget = 15 * time.Minute
+// WriteTimeout is the API server's write timeout (SPEC §8). It is long
+// because apply is synchronous; an apply budget at or above it would let the
+// HTTP response time out while apply carries on.
+const WriteTimeout = 15 * time.Minute
 
 // defaultOwnNamespace is protected when POD_NAMESPACE is unset (run-local).
 const defaultOwnNamespace = "sre-tool"
@@ -109,8 +110,8 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	if c.RolloutTimeout <= 0 || c.RolloutPollInterval <= 0 {
 		return Config{}, errors.New("--rollout-timeout and --rollout-poll-interval must be positive")
 	}
-	if c.ApplyBudget < c.RolloutTimeout || c.ApplyBudget >= maxApplyBudget {
-		return Config{}, fmt.Errorf("--apply-budget %s must be at least --rollout-timeout %s and less than %s (the API write timeout)", c.ApplyBudget, c.RolloutTimeout, maxApplyBudget)
+	if c.ApplyBudget < c.RolloutTimeout || c.ApplyBudget >= WriteTimeout {
+		return Config{}, fmt.Errorf("--apply-budget %s must be at least --rollout-timeout %s and less than %s (the API write timeout)", c.ApplyBudget, c.RolloutTimeout, WriteTimeout)
 	}
 	if c.MaxNamespaces < 1 {
 		return Config{}, errors.New("--max-namespaces must be at least 1")
