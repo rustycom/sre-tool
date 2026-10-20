@@ -1,0 +1,80 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    sre-tool.io/expected-policies: "2"
+    sre-tool.io/request: '{"isolate":{"a":{"namespaces":["tenant-a"],"selector":{"app":"gateway"}},"b":{"namespaces":["tenant-b"],"selector":{"app":"dashboard"}}}}'
+  labels:
+    app.kubernetes.io/managed-by: sre-tool
+    sre-tool.io/isolation-id: 59957de534
+    sre-tool.io/side: a
+  name: sre-iso-59957de534-a
+  namespace: tenant-a
+spec:
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+          - tenant-b
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: tenant-b
+      podSelector:
+        matchExpressions:
+        - key: app
+          operator: NotIn
+          values:
+          - dashboard
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.244.0.0/16
+  podSelector:
+    matchLabels:
+      app: gateway
+  policyTypes:
+  - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    sre-tool.io/expected-policies: "2"
+    sre-tool.io/request: '{"isolate":{"a":{"namespaces":["tenant-a"],"selector":{"app":"gateway"}},"b":{"namespaces":["tenant-b"],"selector":{"app":"dashboard"}}}}'
+  labels:
+    app.kubernetes.io/managed-by: sre-tool
+    sre-tool.io/isolation-id: 59957de534
+    sre-tool.io/side: b
+  name: sre-iso-59957de534-b
+  namespace: tenant-b
+spec:
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+          - tenant-a
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: tenant-a
+      podSelector:
+        matchExpressions:
+        - key: app
+          operator: NotIn
+          values:
+          - gateway
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.244.0.0/16
+  podSelector:
+    matchLabels:
+      app: dashboard
+  policyTypes:
+  - Ingress
