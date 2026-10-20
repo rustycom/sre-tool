@@ -1,8 +1,18 @@
 version: "2"
 
-# Standard linter set for now; Phase 6 enables the security and correctness set.
 linters:
-  default: standard
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - revive
+    - gosec
+    - misspell
+  exclusions:
+    rules:
+      # Golden-file tests read and (with -update) write fixtures under testdata/, at paths
+      # the test itself builds from constants. 0644 is the normal mode for files in git.
+      - path: _test\.go
+        linters: [gosec]
+        text: "G304|G306"
 
 formatters:
   enable:
