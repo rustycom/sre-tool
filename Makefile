@@ -70,8 +70,8 @@ workloads: ## Apply the sample workloads and wait until they are ready
 # Implemented in later phases; failing loudly beats silently doing nothing.
 image kind-load deploy undeploy port-forward e2e-isolation e2e-rbac: ## (Phase 3)
 	@echo "$@: not implemented yet (Phase 3)"; exit 1
-run-local: ## (Phase 2)
-	@echo "$@: not implemented yet (Phase 2)"; exit 1
+run-local: ## Run the tool on this machine against the kind cluster (API on 127.0.0.1:8080)
+	go run ./cmd/sre-tool --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)
 e2e-hardening: ## (Phase 5)
 	@echo "$@: not implemented yet (Phase 5)"; exit 1
 e2e: e2e-isolation e2e-hardening e2e-rbac ## All e2e scripts
