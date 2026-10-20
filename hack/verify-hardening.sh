@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Hardening e2e (TESTING §3.2): plan, apply, idempotency, stale plan and the strict-failure
-# demo against the real API server, where dry-run, SSA and rollouts actually happen.
+# Hardening e2e (TESTING §3.2): plan, apply, idempotency, stale plan, the strict-failure
+# demo and undo against the real API server, where dry-run, SSA and rollouts actually happen.
 # Needs: make cluster-up image kind-load deploy. It recreates the two demo namespaces
 # first, because a previous run leaves them hardened and plan would then find nothing.
 set -euo pipefail
@@ -193,5 +193,52 @@ echo "  ok: Service root-nginx answers from the old pods"
 "${KUBECTL[@]}" -n $DEMO annotate deploy/root-nginx sre-tool.io/harden-profile- >/dev/null
 expect_status 200 "$(post /v1/hardening/plan "$BODY")" "plan after rollout undo"
 check "back to zero patch actions" '.summary.patch == 0'
+
+echo "Stage 6: undo"
+# A human changes one field sre-tool set. kubectl's update takes ownership of the changed
+# field (I-16), so undo, which releases only what sre-tool still owns, must keep it.
+"${KUBECTL[@]}" -n $DEMO set resources deploy/safe-app --requests=cpu=200m >/dev/null
+"${KUBECTL[@]}" -n $DEMO rollout status deploy/safe-app --timeout=180s >/dev/null
+UNDO="{\"namespaces\":[\"$DEMO\",\"$LR\"]"
+before=$(state)
+expect_status 200 "$(post /v1/hardening/undo "$UNDO,\"dryRun\":true}")" "undo dry-run"
+check "dry-run: 9 workloads, nothing written" '[.results[] | .status] | length == 9 and all(. == "dry_run")'
+check "dry-run: safe-app releases seccomp and memory, not the human's cpu request" '
+  ([r("safe-app").changes[] | .field] | index("pod.securityContext.seccompProfile.type") != null)
+  and ([r("safe-app").changes[] | .field] | index("container.resources.requests.memory") != null)
+  and ([r("safe-app").changes[] | .field] | index("container.resources.requests.cpu") == null)
+  and ([r("safe-app").changes[] | .to] | all(. == null))'
+[[ $(state) == "$before" ]] || die "undo dry-run changed generations or ReplicaSets"
+echo "  ok: dry-run left generations and ReplicaSet counts unchanged"
+start=$SECONDS
+expect_status 200 "$(post /v1/hardening/undo "$UNDO}")" "undo"
+check "undo complete on the 9 hardened workloads" '.outcome == "complete" and ([.results[] | select(.status == "applied")] | length) == 9'
+echo "  undo took $((SECONDS - start))s"
+rollouts
+echo "  every rollout healthy"
+expect_field deploy/safe-app '{.spec.template.spec.containers[0].resources.requests.cpu}' 200m
+expect_field deploy/safe-app '{.spec.template.spec.securityContext.seccompProfile.type}' ""
+expect_field deploy/safe-app '{.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation}' ""
+expect_field deploy/safe-app '{.spec.template.spec.containers[0].resources.requests.memory}' ""
+expect_field deploy/safe-app '{.spec.template.spec.containers[0].resources.limits.memory}' ""
+expect_field deploy/safe-app '{.spec.template.spec.containers[0].env[?(@.name=="E2E_STALE")].value}' 1
+expect_field deploy/limits-only '{.spec.template.spec.containers[0].resources.requests.cpu}' ""
+expect_field deploy/limits-only '{.spec.template.spec.containers[0].resources.limits.memory}' 64Mi
+expect_field statefulset/stateful-app '{.spec.template.spec.securityContext.seccompProfile.type}' ""
+expect_field daemonset/node-agent '{.spec.template.spec.securityContext.seccompProfile.type}' ""
+expect_field cronjob/nightly '{.spec.jobTemplate.spec.template.spec.securityContext.seccompProfile.type}' ""
+expect_field deploy/lr-app '{.spec.template.spec.containers[0].resources.requests.cpu}' "" $LR
+undone_event() {
+  "${KUBECTL[@]}" -n $DEMO get events.events.k8s.io -o json |
+    jq -e '.items[] | select(.reason == "HardeningUndone" and .regarding.name == "safe-app")' >/dev/null
+}
+poll_until 30 undone_event || die "no HardeningUndone event on $DEMO/safe-app"
+echo "  ok: Event HardeningUndone on deploy/safe-app"
+before=$(state)
+expect_status 200 "$(post /v1/hardening/undo "$UNDO}")" "undo again"
+check "second undo complete and changed no field" '.outcome == "complete" and ([.results[] | .changes // [] | length] | add // 0) == 0'
+after=$(state)
+[[ $after == "$before" ]] || die "second undo changed generations or ReplicaSets: $(diff <(echo "$before") <(echo "$after"))"
+echo "  generations and ReplicaSet counts unchanged ($(wc -l <<<"$after" | tr -d ' ') values)"
 
 echo "PASS: hardening e2e"
