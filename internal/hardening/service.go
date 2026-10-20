@@ -104,7 +104,7 @@ func (s *Service) plan(ctx context.Context, namespaces []string) (Plan, Input, e
 		return Plan{}, Input{}, err
 	}
 	plan := BuildPlan(in, s.set.Defaults)
-	validatePlan(ctx, s.validator, &plan)
+	validatePlan(ctx, s.validator, &plan, in)
 	return plan, in, nil
 }
 
@@ -193,7 +193,8 @@ func (s *Service) applyOne(ctx context.Context, w Workload, in Input, start time
 		return &halt{reason: "dry_run_failed", remedy: "fix or annotate " + SkipAnnotation + `: "true" on this workload, then plan again`}
 	}
 
-	p, err := BuildPatch(w)
+	// Built from the object just re-read, so it carries what sre-tool owns now.
+	p, err := BuildPatch(w, obj)
 	if err == nil {
 		since := s.set.Now()
 		var applied runtime.Object

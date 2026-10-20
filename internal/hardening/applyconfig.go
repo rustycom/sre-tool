@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,34 +19,101 @@ import (
 // FieldManager owns every field the tool sets (server-side apply).
 const FieldManager = "sre-tool"
 
-// Patch is one workload's server-side apply: a typed apply configuration
-// that holds only the planned fields plus the keys that locate them (I-15).
+// Patch is one workload's server-side apply configuration.
 type Patch struct {
 	Kind, Namespace, Name string
 	config                any // a *<Kind>ApplyConfiguration
 }
 
-// BuildPatch turns a patch workload's changes into its apply configuration.
-func BuildPatch(w Workload) (Patch, error) {
-	tpl, err := podTemplate(w.Changes)
+// BuildPatch builds the apply configuration for a patch workload from its
+// live object: the fields sre-tool already owns there, plus the planned
+// changes, plus the container names that key them (I-15).
+//
+// Starting from what sre-tool owns is required, not cosmetic: an apply
+// removes every field its manager owned and no longer sends (I-17), so a
+// configuration with only the new changes would strip earlier hardening
+// (moving a workload to strict would drop its seccomp profile and resource
+// defaults). Nothing owned by another manager is included (ADR-019).
+func BuildPatch(w Workload, live runtime.Object) (Patch, error) {
+	p := Patch{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name}
+	tpl, err := p.extract(live)
 	if err != nil {
 		return Patch{}, fmt.Errorf("%s %s/%s: %w", w.Kind, w.Namespace, w.Name, err)
 	}
-	p := Patch{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name}
-	switch w.Kind {
-	case "Deployment":
-		p.config = appsv1ac.Deployment(w.Name, w.Namespace).WithSpec(appsv1ac.DeploymentSpec().WithTemplate(tpl))
-	case "StatefulSet":
-		p.config = appsv1ac.StatefulSet(w.Name, w.Namespace).WithSpec(appsv1ac.StatefulSetSpec().WithTemplate(tpl))
-	case "DaemonSet":
-		p.config = appsv1ac.DaemonSet(w.Name, w.Namespace).WithSpec(appsv1ac.DaemonSetSpec().WithTemplate(tpl))
-	case "CronJob":
-		p.config = batchv1ac.CronJob(w.Name, w.Namespace).WithSpec(batchv1ac.CronJobSpec().WithJobTemplate(
-			batchv1ac.JobTemplateSpec().WithSpec(batchv1ac.JobSpec().WithTemplate(tpl))))
-	default:
-		return Patch{}, fmt.Errorf("%s %s/%s: kind cannot be patched", w.Kind, w.Namespace, w.Name)
+	if tpl.Spec == nil {
+		tpl.WithSpec(corev1ac.PodSpec())
+	}
+	for _, ch := range w.Changes {
+		if err := addChange(tpl.Spec, ch); err != nil {
+			return Patch{}, fmt.Errorf("%s %s/%s: %w", w.Kind, w.Namespace, w.Name, err)
+		}
 	}
 	return p, nil
+}
+
+// extract sets p.config to what sre-tool owns on live and returns its pod
+// template, created empty when sre-tool owns nothing there yet.
+func (p *Patch) extract(live runtime.Object) (*corev1ac.PodTemplateSpecApplyConfiguration, error) {
+	tpl := corev1ac.PodTemplateSpec()
+	switch o := live.(type) {
+	case *appsv1.Deployment:
+		ac, err := appsv1ac.ExtractDeployment(o, FieldManager)
+		if err != nil {
+			return nil, fmt.Errorf("extract owned fields: %w", err)
+		}
+		if ac.Spec == nil {
+			ac.WithSpec(appsv1ac.DeploymentSpec())
+		}
+		if ac.Spec.Template == nil {
+			ac.Spec.WithTemplate(tpl)
+		}
+		p.config, tpl = ac, ac.Spec.Template
+	case *appsv1.StatefulSet:
+		ac, err := appsv1ac.ExtractStatefulSet(o, FieldManager)
+		if err != nil {
+			return nil, fmt.Errorf("extract owned fields: %w", err)
+		}
+		if ac.Spec == nil {
+			ac.WithSpec(appsv1ac.StatefulSetSpec())
+		}
+		if ac.Spec.Template == nil {
+			ac.Spec.WithTemplate(tpl)
+		}
+		p.config, tpl = ac, ac.Spec.Template
+	case *appsv1.DaemonSet:
+		ac, err := appsv1ac.ExtractDaemonSet(o, FieldManager)
+		if err != nil {
+			return nil, fmt.Errorf("extract owned fields: %w", err)
+		}
+		if ac.Spec == nil {
+			ac.WithSpec(appsv1ac.DaemonSetSpec())
+		}
+		if ac.Spec.Template == nil {
+			ac.Spec.WithTemplate(tpl)
+		}
+		p.config, tpl = ac, ac.Spec.Template
+	case *batchv1.CronJob:
+		ac, err := batchv1ac.ExtractCronJob(o, FieldManager)
+		if err != nil {
+			return nil, fmt.Errorf("extract owned fields: %w", err)
+		}
+		if ac.Spec == nil {
+			ac.WithSpec(batchv1ac.CronJobSpec())
+		}
+		if ac.Spec.JobTemplate == nil {
+			ac.Spec.WithJobTemplate(batchv1ac.JobTemplateSpec())
+		}
+		if ac.Spec.JobTemplate.Spec == nil {
+			ac.Spec.JobTemplate.WithSpec(batchv1ac.JobSpec())
+		}
+		if ac.Spec.JobTemplate.Spec.Template == nil {
+			ac.Spec.JobTemplate.Spec.WithTemplate(tpl)
+		}
+		p.config, tpl = ac, ac.Spec.JobTemplate.Spec.Template
+	default:
+		return nil, fmt.Errorf("kind %T cannot be patched", live)
+	}
+	return tpl, nil
 }
 
 // send applies the patch with force: false, so a field another manager owns
@@ -69,71 +138,44 @@ func (p Patch) send(ctx context.Context, c kubernetes.Interface, dryRun bool) (r
 	return nil, fmt.Errorf("%s %s/%s: no apply configuration", p.Kind, p.Namespace, p.Name)
 }
 
-// containerPatch collects one container's changes. Resources are gathered
-// first because WithRequests and WithLimits replace the whole list.
-type containerPatch struct {
-	ac               *corev1ac.ContainerApplyConfiguration
-	init             bool
-	requests, limits corev1.ResourceList
-}
-
-func (c *containerPatch) securityContext() *corev1ac.SecurityContextApplyConfiguration {
-	if c.ac.SecurityContext == nil {
-		c.ac.WithSecurityContext(corev1ac.SecurityContext())
+// container returns the named container in spec's configuration, adding it
+// with only its name (the list key) when sre-tool owns nothing in it yet.
+// The pointer is into the slice, so it is used before the next append.
+func container(spec *corev1ac.PodSpecApplyConfiguration, name string, init bool) *corev1ac.ContainerApplyConfiguration {
+	list := &spec.Containers
+	if init {
+		list = &spec.InitContainers
 	}
-	return c.ac.SecurityContext
-}
-
-// podTemplate builds the pod template part of the apply configuration.
-// Containers keep the order of their first change, which follows template
-// order, so the output is deterministic.
-func podTemplate(changes []Change) (*corev1ac.PodTemplateSpecApplyConfiguration, error) {
-	spec := corev1ac.PodSpec()
-	var order []*containerPatch
-	byName := map[string]*containerPatch{}
-	for _, ch := range changes {
-		if ch.Container == "" {
-			t, ok := ch.To.(string)
-			if ch.Field != FieldSeccomp || !ok {
-				return nil, fmt.Errorf("unsupported pod-level change %s=%v", ch.Field, ch.To)
-			}
-			spec.WithSecurityContext(corev1ac.PodSecurityContext().WithSeccompProfile(
-				corev1ac.SeccompProfile().WithType(corev1.SeccompProfileType(t))))
-			continue
-		}
-		c := byName[ch.Container]
-		if c == nil {
-			c = &containerPatch{ac: corev1ac.Container().WithName(ch.Container), init: ch.Init,
-				requests: corev1.ResourceList{}, limits: corev1.ResourceList{}}
-			byName[ch.Container] = c
-			order = append(order, c)
-		}
-		if err := c.add(ch); err != nil {
-			return nil, fmt.Errorf("container %s: %w", ch.Container, err)
+	for i := range *list {
+		if c := &(*list)[i]; c.Name != nil && *c.Name == name {
+			return c
 		}
 	}
-	for _, c := range order {
-		if len(c.requests) > 0 || len(c.limits) > 0 {
-			r := corev1ac.ResourceRequirements()
-			if len(c.requests) > 0 {
-				r.WithRequests(c.requests)
-			}
-			if len(c.limits) > 0 {
-				r.WithLimits(c.limits)
-			}
-			c.ac.WithResources(r)
-		}
-		// WithContainers copies the value, so it runs after the container is complete.
-		if c.init {
-			spec.WithInitContainers(c.ac)
-		} else {
-			spec.WithContainers(c.ac)
-		}
-	}
-	return corev1ac.PodTemplateSpec().WithSpec(spec), nil
+	*list = append(*list, *corev1ac.Container().WithName(name))
+	return &(*list)[len(*list)-1]
 }
 
-func (c *containerPatch) add(ch Change) error {
+// addChange sets one planned field in the pod spec configuration.
+func addChange(spec *corev1ac.PodSpecApplyConfiguration, ch Change) error {
+	if ch.Container == "" {
+		t, ok := ch.To.(string)
+		if ch.Field != FieldSeccomp || !ok {
+			return fmt.Errorf("unsupported pod-level change %s=%v", ch.Field, ch.To)
+		}
+		if spec.SecurityContext == nil {
+			spec.WithSecurityContext(corev1ac.PodSecurityContext())
+		}
+		spec.SecurityContext.WithSeccompProfile(corev1ac.SeccompProfile().WithType(corev1.SeccompProfileType(t)))
+		return nil
+	}
+	c := container(spec, ch.Container, ch.Init)
+	if err := setContainerField(c, ch); err != nil {
+		return fmt.Errorf("container %s: %w", ch.Container, err)
+	}
+	return nil
+}
+
+func setContainerField(c *corev1ac.ContainerApplyConfiguration, ch Change) error {
 	switch ch.Field {
 	case FieldCPURequest, FieldMemoryRequest, FieldMemoryLimit:
 		s, ok := ch.To.(string)
@@ -144,27 +186,41 @@ func (c *containerPatch) add(ch Change) error {
 		if err != nil {
 			return fmt.Errorf("%s: %w", ch.Field, err)
 		}
+		if c.Resources == nil {
+			c.WithResources(corev1ac.ResourceRequirements())
+		}
+		r := c.Resources
 		switch ch.Field {
-		case FieldCPURequest:
-			c.requests[corev1.ResourceCPU] = q
-		case FieldMemoryRequest:
-			c.requests[corev1.ResourceMemory] = q
+		case FieldCPURequest, FieldMemoryRequest:
+			if r.Requests == nil {
+				r.WithRequests(corev1.ResourceList{})
+			}
+			name := corev1.ResourceCPU
+			if ch.Field == FieldMemoryRequest {
+				name = corev1.ResourceMemory
+			}
+			(*r.Requests)[name] = q
 		default:
-			c.limits[corev1.ResourceMemory] = q
+			if r.Limits == nil {
+				r.WithLimits(corev1.ResourceList{})
+			}
+			(*r.Limits)[corev1.ResourceMemory] = q
 		}
 	case FieldAllowPrivEsc, FieldRunAsNonRoot, FieldReadOnlyRootFS:
 		b, ok := ch.To.(bool)
 		if !ok {
 			return fmt.Errorf("%s: want a bool, got %T", ch.Field, ch.To)
 		}
-		sc := c.securityContext()
+		if c.SecurityContext == nil {
+			c.WithSecurityContext(corev1ac.SecurityContext())
+		}
 		switch ch.Field {
 		case FieldAllowPrivEsc:
-			sc.WithAllowPrivilegeEscalation(b)
+			c.SecurityContext.WithAllowPrivilegeEscalation(b)
 		case FieldRunAsNonRoot:
-			sc.WithRunAsNonRoot(b)
+			c.SecurityContext.WithRunAsNonRoot(b)
 		default:
-			sc.WithReadOnlyRootFilesystem(b)
+			c.SecurityContext.WithReadOnlyRootFilesystem(b)
 		}
 	case FieldCapabilitiesDrop:
 		drop, ok := ch.To.([]string)
@@ -175,7 +231,10 @@ func (c *containerPatch) add(ch Change) error {
 		for _, d := range drop {
 			caps = append(caps, corev1.Capability(d))
 		}
-		c.securityContext().WithCapabilities(corev1ac.Capabilities().WithDrop(caps...))
+		if c.SecurityContext == nil {
+			c.WithSecurityContext(corev1ac.SecurityContext())
+		}
+		c.SecurityContext.WithCapabilities(corev1ac.Capabilities().WithDrop(caps...))
 	default:
 		return fmt.Errorf("unsupported change %s", ch.Field)
 	}
