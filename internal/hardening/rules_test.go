@@ -327,3 +327,20 @@ func TestRules_LimitRangeCoversResource(t *testing.T) {
 		t.Errorf("findings %v, want R2 and R3", got)
 	}
 }
+
+func TestRules_WindowsSkipsLinuxOnlyFields(t *testing.T) {
+	s := specWith(func(s *corev1.PodSpec) { s.OS = &corev1.PodOS{Name: corev1.Windows} })
+	r := templateRules(s, ruleContext{strict: true, defaults: testDefaults})
+	got := changed(r)
+	for _, f := range []string{"/" + FieldSeccomp, "app/" + FieldAllowPrivEsc, "app/" + FieldCapabilitiesDrop, "app/" + FieldReadOnlyRootFS} {
+		if slices.Contains(got, f) {
+			t.Errorf("%s set on a Windows pod; API validation rejects it", f)
+		}
+	}
+	if !containsAll(got, []string{"app/" + FieldCPURequest, "app/" + FieldRunAsNonRoot}) {
+		t.Errorf("resources and runAsNonRoot still apply on Windows: %v", got)
+	}
+	if !slices.Contains(findingRules(r), "/WIN") {
+		t.Errorf("no WIN finding: %v", findingRules(r))
+	}
+}

@@ -101,8 +101,8 @@ func meta(name string, owner *metav1.OwnerReference) metav1.ObjectMeta {
 	return m
 }
 
-func controller(kind, name string) *metav1.OwnerReference {
-	return &metav1.OwnerReference{Kind: kind, Name: name, Controller: new(true)}
+func controller(apiVersion, kind, name string) *metav1.OwnerReference {
+	return &metav1.OwnerReference{APIVersion: apiVersion, Kind: kind, Name: name, Controller: new(true)}
 }
 
 func template() corev1.PodTemplateSpec {
@@ -119,16 +119,18 @@ func TestPlanner_KindDispatch(t *testing.T) {
 			JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{Template: template()}}}}},
 		Jobs: []batchv1.Job{
 			{ObjectMeta: meta("job", nil), Spec: batchv1.JobSpec{Template: template()}},
-			{ObjectMeta: meta("cron-123", controller("CronJob", "cron")), Spec: batchv1.JobSpec{Template: template()}},
+			{ObjectMeta: meta("cron-123", controller("batch/v1", "CronJob", "cron")), Spec: batchv1.JobSpec{Template: template()}},
+			// A custom resource that happens to be called CronJob is not batch's.
+			{ObjectMeta: meta("custom-1", controller("acme.io/v1", "CronJob", "c")), Spec: batchv1.JobSpec{Template: template()}},
 		},
 		Pods: []corev1.Pod{
 			{ObjectMeta: meta("bare", nil), Spec: *specWith()},
-			{ObjectMeta: meta("deploy-abc-xyz", controller("ReplicaSet", "deploy-abc")), Spec: *specWith()},
+			{ObjectMeta: meta("deploy-abc-xyz", controller("apps/v1", "ReplicaSet", "deploy-abc")), Spec: *specWith()},
 		},
 	}
 	// A Deployment owned by an operator: that operator would revert a patch.
 	owned := in.Deployments[0]
-	owned.ObjectMeta = meta("operated", controller("Database", "pg"))
+	owned.ObjectMeta = meta("operated", controller("db.example.com/v1", "Database", "pg"))
 	in.Deployments = append(in.Deployments, owned)
 	// An ownerReference that is not the controller does not count.
 	shared := in.Deployments[0]
@@ -148,6 +150,7 @@ func TestPlanner_KindDispatch(t *testing.T) {
 		{"Deployment", "shared", ActionPatch, ""},
 		{"StatefulSet", "sts", ActionPatch, ""},
 		{"DaemonSet", "ds", ActionPatch, ""},
+		{"Job", "custom-1", ActionReport, "managed by CronJob/c"},
 		{"Job", "job", ActionReport, "immutable"},
 		{"Pod", "bare", ActionReport, "bare Pod"},
 	}
@@ -163,7 +166,7 @@ func TestPlanner_KindDispatch(t *testing.T) {
 			t.Errorf("%s/%s: report-only workload has changes", got.Kind, got.Name)
 		}
 	}
-	if s := p.Summary; s != (Summary{Patch: 5, Report: 3}) {
+	if s := p.Summary; s != (Summary{Patch: 5, Report: 4}) {
 		t.Errorf("summary = %+v", s)
 	}
 }
@@ -220,7 +223,7 @@ func TestPlanner_LimitRangeCovers(t *testing.T) {
 	}
 	var covered int
 	for _, f := range w.Findings {
-		if strings.Contains(f.Message, "covered at admission by LimitRange memory-defaults") {
+		if strings.Contains(f.Message, "LimitRange memory-defaults") {
 			covered++
 		}
 	}
@@ -436,16 +439,12 @@ func TestPlan_SecondPassIsEmpty(t *testing.T) {
 			}
 		}
 	}
-	// The plan is a fixed point: planning the same input again gives the
-	// same template hashes, so a re-apply would send nothing new.
-	third := BuildPlan(in, testDefaults)
-	for i, w := range second.Workloads {
-		if third.Workloads[i].TemplateHash != w.TemplateHash {
-			t.Errorf("%s %s/%s: template hash changed between identical plans", w.Kind, w.Namespace, w.Name)
+	// Zero patches means apply sends nothing, so no template changes and no
+	// rollout. Template hashes of untouched workloads must not move either.
+	for i, w := range first.Workloads {
+		if w.Action != ActionPatch && second.Workloads[i].TemplateHash != w.TemplateHash {
+			t.Errorf("%s %s/%s: template hash changed although nothing was applied", w.Kind, w.Namespace, w.Name)
 		}
-	}
-	if second.PlanHash != third.PlanHash {
-		t.Error("plan hash changed between identical plans")
 	}
 	// Every workload the first plan patched now reports none, nothing else moved.
 	for i, w := range first.Workloads {

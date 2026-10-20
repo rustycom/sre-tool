@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -136,7 +137,7 @@ func candidates(in Input) []candidate {
 		out = append(out, candidate{kind: "CronJob", meta: o.ObjectMeta, spec: o.Spec.JobTemplate.Spec.Template.Spec, hashed: o.Spec.JobTemplate.Spec.Template, impact: "future Jobs only; nothing restarts"})
 	}
 	for _, o := range in.Jobs {
-		if owner := metav1.GetControllerOfNoCopy(&o.ObjectMeta); owner != nil && owner.Kind == "CronJob" {
+		if owner := metav1.GetControllerOfNoCopy(&o.ObjectMeta); owner != nil && owner.Kind == "CronJob" && strings.HasPrefix(owner.APIVersion, "batch/") {
 			continue
 		}
 		out = append(out, candidate{kind: "Job", meta: o.ObjectMeta, spec: o.Spec.Template.Spec, hashed: o.Spec.Template,
