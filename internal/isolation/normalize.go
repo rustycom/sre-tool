@@ -14,7 +14,7 @@ const idHexLen = 10
 
 // Normalize returns the canonical form of a validated request (FR-ISO-02):
 // namespace folded into namespaces, namespaces de-duplicated and sorted,
-// expressions sorted by (key, operator) with sorted values, and the side whose
+// expressions sorted by (key, operator, values) with sorted, de-duplicated values, and the side whose
 // canonical JSON sorts first as side a. Equivalent requests therefore get the
 // same ID and byte-identical policies. The input is not modified.
 func Normalize(req Request) Request {
@@ -37,13 +37,19 @@ func normalizeSide(s Side) Side {
 	for _, e := range s.MatchExpressions {
 		e.Values = slices.Clone(e.Values)
 		slices.Sort(e.Values)
+		e.Values = slices.Compact(e.Values)
 		exprs = append(exprs, e)
 	}
 	slices.SortStableFunc(exprs, func(x, y metav1.LabelSelectorRequirement) int {
 		if c := strings.Compare(x.Key, y.Key); c != 0 {
 			return c
 		}
-		return strings.Compare(string(x.Operator), string(y.Operator))
+		if c := strings.Compare(string(x.Operator), string(y.Operator)); c != 0 {
+			return c
+		}
+		// Values break ties, so two requirements on the same key and
+		// operator cannot keep their input order and change the ID.
+		return slices.Compare(x.Values, y.Values)
 	})
 
 	var selector map[string]string
