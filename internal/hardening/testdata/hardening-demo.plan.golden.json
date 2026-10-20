@@ -612,7 +612,7 @@
           "container": "agnhost",
           "rule": "R3",
           "severity": "info",
-          "message": "memory limit covered at admission by LimitRange memory-defaults"
+          "message": "memory limit left to LimitRange memory-defaults, which defaults memory at admission"
         },
         {
           "container": "agnhost",

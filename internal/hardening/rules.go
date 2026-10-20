@@ -36,20 +36,32 @@ func (r *result) finding(container, rule, severity, message string) {
 // added through their own subresource and cannot be set in a template.
 func templateRules(spec *corev1.PodSpec, ctx ruleContext) result {
 	var r result
-	ruleS1(&r, spec)
+	// API validation rejects seccomp, allowPrivilegeEscalation, capabilities
+	// and readOnlyRootFilesystem on Windows pods, so setting them would only
+	// make apply fail (ADR-018). Resources and runAsNonRoot are allowed.
+	windows := spec.OS != nil && spec.OS.Name == corev1.Windows
+	if windows {
+		r.finding("", "WIN", "info", "Windows pod: seccomp, allowPrivilegeEscalation, capabilities and readOnlyRootFilesystem are not allowed, so S1, S2, X2 and X3 are skipped")
+	} else {
+		ruleS1(&r, spec)
+	}
 	ruleHostNamespaces(&r, spec)
 	for _, cs := range [][]corev1.Container{spec.InitContainers, spec.Containers} {
 		for i := range cs {
 			c := &cs[i]
 			rulePrivileged(&r, c)
-			ruleS2(&r, c)
+			if !windows {
+				ruleS2(&r, c)
+			}
 			ruleRequest(&r, c, corev1.ResourceCPU, "R1", ctx.defaults.CPURequest, FieldCPURequest, ctx)
 			ruleRequest(&r, c, corev1.ResourceMemory, "R2", ctx.defaults.MemoryRequest, FieldMemoryRequest, ctx)
 			ruleR3(&r, c, ctx)
 			ruleR4(&r, c)
 			ruleX1(&r, c, spec, ctx)
-			ruleX2(&r, c, ctx)
-			ruleX3(&r, c, ctx)
+			if !windows {
+				ruleX2(&r, c, ctx)
+				ruleX3(&r, c, ctx)
+			}
 		}
 	}
 	return r
@@ -120,7 +132,9 @@ func ruleR3(r *result, c *corev1.Container, ctx ruleContext) {
 		return
 	}
 	if lr, ok := ctx.coveredBy[corev1.ResourceMemory]; ok {
-		r.finding(c.Name, "R3", "info", "memory limit covered at admission by LimitRange "+lr)
+		// SPEC §7.3 skips R1–R3 for a resource the LimitRange defaults at all.
+		// It may set only defaultRequest, so this does not claim a limit is set.
+		r.finding(c.Name, "R3", "info", "memory limit left to LimitRange "+lr+", which defaults memory at admission")
 		return
 	}
 	req, ok := c.Resources.Requests[corev1.ResourceMemory]
