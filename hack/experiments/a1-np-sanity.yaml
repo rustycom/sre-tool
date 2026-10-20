@@ -1,0 +1,40 @@
+# A1: does Cilium enforce standard NetworkPolicy at all? A server and a client in a scratch
+# namespace; probe once without policy, then apply a1-deny-all.yaml and probe again.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: np-sanity
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: server
+  namespace: np-sanity
+  labels: {app: server}
+spec:
+  containers:
+  - name: agnhost
+    image: registry.k8s.io/e2e-test-images/agnhost:2.66.1@sha256:6e2eef87d0dc77e070a7549bc5fdfa290c0fefe3359eb33c2ad1eda692fe66a4
+    args: ["netexec", "--http-port=8080"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  namespace: np-sanity
+spec:
+  selector: {app: server}
+  ports:
+  - port: 8080
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client
+  namespace: np-sanity
+  labels: {app: client}
+spec:
+  containers:
+  - name: agnhost
+    image: registry.k8s.io/e2e-test-images/agnhost:2.66.1@sha256:6e2eef87d0dc77e070a7549bc5fdfa290c0fefe3359eb33c2ad1eda692fe66a4
+    args: ["pause"]

@@ -1,0 +1,25 @@
+# A8: the kind of partial apply configuration sre-tool will send (S1, S2, R1-R3) for CronJob/nightly.
+# Run: kubectl --context kind-sre-tool apply --server-side --dry-run=server --field-manager=sre-tool -f hack/experiments/a8-dry-run/cronjob.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly
+  namespace: hardening-demo
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+          - name: job
+            securityContext:
+              allowPrivilegeEscalation: false
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                memory: 512Mi

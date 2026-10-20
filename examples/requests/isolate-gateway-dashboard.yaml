@@ -1,0 +1,10 @@
+# The brief's example request, verbatim. The API MUST accept this exactly (SPEC FR-ISO-01).
+isolate:
+  a:
+    namespace: tenant-a
+    selector:
+      app: gateway
+  b:
+    namespace: tenant-b
+    selector:
+      app: dashboard
