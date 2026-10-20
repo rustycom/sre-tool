@@ -88,9 +88,9 @@ port-forward: ## Expose the tool's API on localhost:8080
 e2e-isolation: ## Isolation connectivity matrix against kind (needs deploy)
 	hack/verify-isolation.sh
 
-# Implemented later in Phase 3; failing loudly beats silently doing nothing.
-e2e-rbac: ## (Phase 3)
-	@echo "$@: not implemented yet (Phase 3)"; exit 1
+e2e-rbac: ## Check what the tool's ServiceAccount may and may not do
+	hack/verify-rbac.sh
+
 run-local: ## Run the tool on this machine against the kind cluster (API on 127.0.0.1:8080)
 	go run ./cmd/sre-tool --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)
 e2e-hardening: ## (Phase 5)
