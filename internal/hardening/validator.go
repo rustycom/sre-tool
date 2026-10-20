@@ -14,7 +14,8 @@ import (
 // DryRun and persists the change (FINDINGS A7): unit tests fake it, and the
 // real one runs only against a real API server.
 type Validator interface {
-	DryRun(ctx context.Context, p Patch) error
+	// DryRun returns the object as it would be after the apply.
+	DryRun(ctx context.Context, p Patch) (runtime.Object, error)
 }
 
 // ClientValidator dry-runs patches against the API server, which runs
@@ -24,9 +25,8 @@ type Validator interface {
 type ClientValidator struct{ Client kubernetes.Interface }
 
 // DryRun sends p with DryRun: [All].
-func (v ClientValidator) DryRun(ctx context.Context, p Patch) error {
-	_, err := p.send(ctx, v.Client, true)
-	return err
+func (v ClientValidator) DryRun(ctx context.Context, p Patch) (runtime.Object, error) {
+	return p.send(ctx, v.Client, true)
 }
 
 // validatePlan dry-runs every patch workload and records the outcome in
@@ -40,7 +40,7 @@ func validatePlan(ctx context.Context, v Validator, plan *Plan, in Input) {
 		}
 		p, err := BuildPatch(*w, liveObject(in, w.Kind, w.Namespace, w.Name))
 		if err == nil {
-			err = v.DryRun(ctx, p)
+			_, err = v.DryRun(ctx, p)
 		}
 		w.DryRun = "ok"
 		if err != nil {
