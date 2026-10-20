@@ -51,10 +51,15 @@ func routeOf(pattern string) string {
 	return pattern
 }
 
-// withMiddleware adds, outermost first: request ID, access log, and panic
-// recovery. It reads the route after the mux has run, because ServeMux sets
+// RequestObserver records per-request metrics.
+type RequestObserver interface {
+	ObserveRequest(route, method string, code int, d time.Duration)
+}
+
+// withMiddleware adds, outermost first: request ID, access log and metrics,
+// and panic recovery. It reads the route after the mux has run, because ServeMux sets
 // r.Pattern on the request it is given.
-func withMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
+func withMiddleware(next http.Handler, logger *slog.Logger, obs RequestObserver) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		id := r.Header.Get("X-Request-ID")
@@ -76,8 +81,10 @@ func withMiddleware(next http.Handler, logger *slog.Logger) http.Handler {
 						Code: "internal", Message: "the request failed; see the tool's log for request " + id})
 				}
 			}
-			logger.InfoContext(r.Context(), "request", "request_id", id, "method", r.Method, "route", routeOf(r.Pattern),
-				"status", rec.status, "duration_ms", time.Since(start).Milliseconds())
+			route, d := routeOf(r.Pattern), time.Since(start)
+			logger.InfoContext(r.Context(), "request", "request_id", id, "method", r.Method, "route", route,
+				"status", rec.status, "duration_ms", d.Milliseconds())
+			obs.ObserveRequest(route, r.Method, rec.status, d)
 		}()
 		next.ServeHTTP(rec, r)
 	})
