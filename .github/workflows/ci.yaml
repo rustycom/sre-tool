@@ -1,0 +1,63 @@
+# CI runs the same make targets as a local run (docs/VERSIONS.md lists every pin).
+# Actions are pinned by commit SHA: a tag can be moved to other code, a SHA cannot.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.2" # same toolchain as the Dockerfile builder
+          cache: true
+      # gofmt, vet, golangci-lint, go test -race, govulncheck, actionlint.
+      - run: make ci
+
+  # Unit tests use a fake clientset that ignores NetworkPolicy enforcement, dry-run and
+  # rollouts (FINDINGS A7); only a real cluster with a real CNI proves those.
+  e2e:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      KIND_VERSION: v0.32.0
+      KIND_SHA256: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+      KUBECTL_VERSION: v1.36.1
+      KUBECTL_SHA256: 629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7
+      HELM_VERSION: v4.2.4
+      HELM_SHA256: c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned kind, kubectl and helm
+        run: |
+          set -euo pipefail
+          curl -fsSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  kind" | sha256sum -c -
+          curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          echo "${KUBECTL_SHA256}  kubectl" | sha256sum -c -
+          curl -fsSLo helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum -c -
+          tar -xzf helm.tgz --strip-components=1 linux-amd64/helm
+          sudo install -m 0755 kind kubectl helm /usr/local/bin/
+          rm -f kind kubectl helm helm.tgz
+      # A 3-node kind cluster runs out of inotify instances at the runner's defaults
+      # (kind "known issues": too many open files).
+      - run: sudo sysctl -w fs.inotify.max_user_instances=512 fs.inotify.max_user_watches=524288
+      # The same targets, in the same order, as a local end-to-end run.
+      - run: make cluster-up workloads image kind-load deploy e2e
+      - name: Cluster state on failure
+        if: failure()
+        # Each line may fail (no cluster yet, tool not deployed); show what exists anyway.
+        run: |
+          k() { kubectl --kubeconfig .kube/kind-sre-tool.kubeconfig --context kind-sre-tool "$@" || true; }
+          k get pods -A -o wide
+          k get events -A --sort-by=.lastTimestamp | tail -n 100
+          k -n sre-tool logs deploy/sre-tool --tail=200

@@ -14,13 +14,15 @@ IMAGE   ?= sre-tool:$(VERSION)
 # Pinned tools live in ./bin (gitignored), so local runs and CI use the same binaries.
 GOLANGCI_LINT_VERSION := 2.14.0
 GOVULNCHECK_VERSION   := 1.8.0
+ACTIONLINT_VERSION    := 1.7.12
 GOLANGCI_LINT := $(CURDIR)/bin/golangci-lint
 GOVULNCHECK   := $(CURDIR)/bin/govulncheck
+ACTIONLINT    := $(CURDIR)/bin/actionlint
 
 WORKLOAD_NAMESPACES := tenant-a tenant-b tenant-c hardening-demo hardening-lr
 
 .DEFAULT_GOAL := help
-.PHONY: help build test tools lint verify cluster-up cluster-down workloads \
+.PHONY: help build test tools lint verify vuln cluster-up cluster-down workloads \
 	image kind-load deploy undeploy port-forward run-local \
 	e2e e2e-isolation e2e-hardening e2e-rbac ci demo
 
@@ -33,12 +35,14 @@ build: ## Build bin/sre-tool
 test: ## Unit tests
 	go test ./...
 
-tools: $(GOLANGCI_LINT) $(GOVULNCHECK) ## Install the pinned golangci-lint and govulncheck into ./bin
+tools: $(GOLANGCI_LINT) $(GOVULNCHECK) $(ACTIONLINT) ## Install the pinned golangci-lint, govulncheck and actionlint into ./bin
 
 $(GOLANGCI_LINT):
 	GOBIN=$(CURDIR)/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_VERSION)
 $(GOVULNCHECK):
 	GOBIN=$(CURDIR)/bin go install golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION)
+$(ACTIONLINT):
+	GOBIN=$(CURDIR)/bin go install github.com/rhysd/actionlint/cmd/actionlint@v$(ACTIONLINT_VERSION)
 
 lint: $(GOLANGCI_LINT) ## golangci-lint, the pinned ./bin copy (same binary as CI)
 	@$(GOLANGCI_LINT) --version | grep -q "version $(GOLANGCI_LINT_VERSION) " || \
@@ -51,6 +55,13 @@ verify: ## gofmt check, go vet, golangci-lint, go test -race
 	go vet ./...
 	$(MAKE) --no-print-directory lint
 	go test -race ./...
+
+vuln: $(GOVULNCHECK) ## govulncheck: known vulnerabilities in code paths we actually call
+	$(GOVULNCHECK) ./...
+
+# The CI verify job runs exactly this target, so a green `make ci` here is a green job there.
+ci: verify vuln $(ACTIONLINT) ## Everything the CI verify job runs, plus actionlint on the workflow
+	$(ACTIONLINT)
 
 cluster-up: ## Create the kind cluster with Cilium
 	hack/up.sh
@@ -98,7 +109,5 @@ e2e-rbac: ## Check what the tool's ServiceAccount may and may not do
 run-local: ## Run the tool on this machine against the kind cluster (API on 127.0.0.1:8080)
 	go run ./cmd/sre-tool --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)
 e2e: e2e-isolation e2e-hardening e2e-rbac ## All e2e scripts
-ci: ## (Phase 6)
-	@echo "$@: not implemented yet (Phase 6)"; exit 1
 demo: ## (Phase 8)
 	@echo "$@: not implemented yet (Phase 8)"; exit 1

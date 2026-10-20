@@ -15,6 +15,7 @@ const (
 // Action is what apply would do with a workload.
 type Action string
 
+// The actions, as they appear in plan and apply responses (SPEC §7.4).
 const (
 	ActionPatch  Action = "patch"
 	ActionNone   Action = "none" // already compliant
