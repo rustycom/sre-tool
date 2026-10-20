@@ -1,0 +1,9 @@
+version: "2"
+
+# Standard linter set for now; Phase 6 enables the security and correctness set.
+linters:
+  default: standard
+
+formatters:
+  enable:
+    - gofmt
