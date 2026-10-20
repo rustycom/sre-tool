@@ -1,0 +1,21 @@
+# build
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+
+# local / secrets
+.env
+*.kubeconfig
+kubeconfig*
+
+# interview prep notes produced by /explain (personal, not part of the submission)
+/notes/
+
+# Claude Code personal settings
+.claude/settings.local.json
+CLAUDE.local.md
+
+# macOS
+.DS_Store
