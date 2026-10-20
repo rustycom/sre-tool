@@ -46,7 +46,8 @@ cluster-down: ## Delete the kind cluster
 workloads: ## Apply the sample workloads and wait until they are ready
 	$(KUBECTL) apply -f examples/workloads/
 	@for ns in $(WORKLOAD_NAMESPACES); do \
-		for w in $$($(KUBECTL) -n $$ns get deploy,statefulset,daemonset -o name); do \
+		ws=$$($(KUBECTL) -n $$ns get deploy,statefulset,daemonset -o name) || exit 1; \
+		for w in $$ws; do \
 			$(KUBECTL) -n $$ns rollout status $$w --timeout=180s || exit 1; \
 		done; \
 	done
