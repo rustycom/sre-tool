@@ -3,23 +3,147 @@
 package main
 
 import (
-	"flag"
+	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"k8s.io/client-go/kubernetes"
+
+	"github.com/rustycom/sre-tool/internal/config"
+	"github.com/rustycom/sre-tool/internal/httpapi"
+	"github.com/rustycom/sre-tool/internal/isolation"
+	"github.com/rustycom/sre-tool/internal/kube"
+	"github.com/rustycom/sre-tool/internal/metrics"
 )
 
 // version is set at build time with -ldflags "-X main.version=<git sha>".
 var version = "dev"
 
-func main() {
-	showVersion := flag.Bool("version", false, "print the version and exit")
-	flag.Parse()
+const (
+	readinessInterval = 5 * time.Second
+	shutdownGrace     = 25 * time.Second // SPEC §9: in-flight requests get up to 25s
+	startupAttempts   = 5
+	apiCallTimeout    = 30 * time.Second
+)
 
-	if *showVersion {
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, "sre-tool:", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfg, err := config.Load(os.Args[1:], os.Getenv)
+	if err != nil {
+		return err
+	}
+	if cfg.ShowVersion {
 		fmt.Println(version)
-		os.Exit(0)
+		return nil
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
+
+	restCfg, err := kube.RESTConfig(cfg.Kubeconfig, cfg.KubeContext)
+	if err != nil {
+		return err
+	}
+	// A hung API call would hold the isolation mutex until the client gave
+	// up; this bounds every request (watches are not used).
+	restCfg.Timeout = apiCallTimeout
+	client, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return fmt.Errorf("create client: %w", err)
 	}
 
-	fmt.Fprintln(os.Stderr, "sre-tool: the server is not implemented yet")
-	os.Exit(1)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	// Handler contexts derive from base, which is cancelled only after the
+	// grace period, so a SIGTERM does not abort in-flight requests at once.
+	base, cancelBase := context.WithCancel(context.Background())
+	defer cancelBase()
+
+	// The recorder has its own context, stopped after the servers, so events
+	// from requests that finish during the grace period are still sent.
+	evCtx, cancelEvents := context.WithCancel(context.Background())
+	defer cancelEvents()
+	recorder, stopEvents, err := kube.NewRecorder(evCtx, client)
+	if err != nil {
+		return err
+	}
+
+	m := metrics.New()
+	svc := isolation.NewService(client, recorder, cfg.PodCIDRs, cfg.ProtectedNamespaces, m.IsolationsActive)
+	ready := httpapi.NewReadiness(func(ctx context.Context) error {
+		return client.Discovery().RESTClient().Get().AbsPath("/version").Do(ctx).Error()
+	}, time.Now)
+
+	apiSrv := httpapi.NewServer(base, cfg.APIAddr, httpapi.NewAPIHandler(svc, logger, m))
+	opsSrv := httpapi.NewServer(base, cfg.OpsAddr, httpapi.NewOpsHandler(ready, m.Handler()))
+	errc := make(chan error, 2)
+	serve := func(srv *http.Server) {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			errc <- fmt.Errorf("listen on %s: %w", srv.Addr, err)
+		}
+	}
+	// Ops first, so /healthz answers (and /readyz says 503) while the
+	// startup check backs off; a liveness probe must not kill us for waiting.
+	go serve(opsSrv)
+	waitForAPIServer(ctx, ready, logger)
+	if err := svc.RefreshActive(ctx); err != nil {
+		logger.Warn("could not count active isolations at startup", "error", err)
+	}
+	go ready.Run(ctx, readinessInterval)
+	go serve(apiSrv)
+	logger.Info("started", "version", version, "api_addr", cfg.APIAddr, "ops_addr", cfg.OpsAddr, "ready", ready.Ready())
+
+	var runErr error
+	select {
+	case <-ctx.Done():
+		logger.Info("shutting down")
+	case runErr = <-errc:
+	}
+
+	// SPEC §9: readiness goes false, listeners stop, in-flight requests get
+	// the grace period, then their contexts are cancelled.
+	ready.ShutDown()
+	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+	defer cancel()
+	for _, srv := range []*http.Server{apiSrv, opsSrv} {
+		if err := srv.Shutdown(shutCtx); err != nil {
+			logger.Warn("shutdown", "addr", srv.Addr, "error", err)
+		}
+	}
+	cancelBase()
+	stopEvents()
+	return runErr
+}
+
+// waitForAPIServer probes the API server with exponential backoff. If it
+// never answers, the tool still starts, but not ready: the readiness loop
+// keeps probing, and the kubelet keeps traffic away until it succeeds.
+func waitForAPIServer(ctx context.Context, ready *httpapi.Readiness, logger *slog.Logger) {
+	delay := time.Second
+	for attempt := 1; attempt <= startupAttempts; attempt++ {
+		pctx, cancel := context.WithTimeout(ctx, readinessInterval)
+		err := ready.Probe(pctx)
+		cancel()
+		if err == nil {
+			return
+		}
+		logger.Warn("API server not reachable", "attempt", attempt, "error", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		delay *= 2
+	}
+	logger.Error("API server still not reachable; starting not ready")
 }
