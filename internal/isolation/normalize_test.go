@@ -53,6 +53,10 @@ func TestNormalize_IDStableAcrossOrdering(t *testing.T) {
 			A: &Side{Namespaces: base.Isolate.A.Namespaces, Selector: base.Isolate.A.Selector,
 				MatchExpressions: []metav1.LabelSelectorRequirement{expr("zone", metav1.LabelSelectorOpExists), expr("env", metav1.LabelSelectorOpIn, "prod", "dev")}},
 			B: base.Isolate.B}}},
+		{"duplicate values", Request{Isolate: Pair{
+			A: &Side{Namespaces: base.Isolate.A.Namespaces, Selector: base.Isolate.A.Selector,
+				MatchExpressions: []metav1.LabelSelectorRequirement{expr("env", metav1.LabelSelectorOpIn, "prod", "dev", "prod"), expr("zone", metav1.LabelSelectorOpExists)}},
+			B: base.Isolate.B}}},
 		{"namespace folded into namespaces", Request{Isolate: Pair{
 			A: base.Isolate.A,
 			B: &Side{Namespaces: []string{"z"}, Selector: map[string]string{"app": "db"}}}}},
@@ -67,6 +71,15 @@ func TestNormalize_IDStableAcrossOrdering(t *testing.T) {
 		})
 	}
 
+	t.Run("same key and operator in either order", func(t *testing.T) {
+		mk := func(first, second string) Request {
+			return Request{Isolate: Pair{A: base.Isolate.A, B: &Side{Namespace: "z", MatchExpressions: []metav1.LabelSelectorRequirement{
+				expr("app", metav1.LabelSelectorOpNotIn, first), expr("app", metav1.LabelSelectorOpNotIn, second)}}}}
+		}
+		if ID(Normalize(mk("x", "y"))) != ID(Normalize(mk("y", "x"))) {
+			t.Error("reordering two NotIn requirements on the same key changed the ID")
+		}
+	})
 	t.Run("a different selector changes the ID", func(t *testing.T) {
 		other := Request{Isolate: Pair{A: base.Isolate.A, B: &Side{Namespace: "z", Selector: map[string]string{"app": "cache"}}}}
 		if ID(Normalize(other)) == want {
