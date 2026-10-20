@@ -11,8 +11,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/events"
@@ -270,5 +272,143 @@ func TestPreflight_ForceProceedsWithWarnings(t *testing.T) {
 	}
 	if warnings != 2 {
 		t.Errorf("IsolationForced events = %d, want 2", warnings)
+	}
+}
+
+func TestDelete_OnlyRemovesOwnPolicies(t *testing.T) {
+	ctx := context.Background()
+	n := Normalize(briefRequest())
+	id := ID(n)
+	own := BuildPolicies(n, id, testCIDRs)
+	managed := func(isoID string) map[string]string {
+		return map[string]string{LabelManagedBy: ManagedByValue, LabelIsolationID: isoID}
+	}
+	others := []networkingv1.NetworkPolicy{
+		// Another isolation's policies.
+		testPolicy("tenant-a", "sre-iso-other-a", gwLabels, managed("other"), ingress),
+		testPolicy("tenant-c", "sre-iso-other-b", nil, managed("other"), ingress),
+		// Unmanaged, with this isolation's name prefix: names prove nothing.
+		testPolicy("tenant-a", "sre-iso-"+id+"-a-copy", gwLabels, nil, ingress),
+		// Carries this isolation's ID but no managed-by label.
+		testPolicy("tenant-b", "lookalike", nil, map[string]string{LabelIsolationID: id}, ingress),
+		// managed-by, but a different ID.
+		testPolicy("tenant-b", "sre-iso-x-b", nil, managed("x"), ingress),
+	}
+	var objs []runtime.Object
+	for i := range own {
+		own[i].UID = types.UID("own-" + own[i].Namespace)
+		objs = append(objs, &own[i])
+	}
+	for i := range others {
+		objs = append(objs, others[i].DeepCopy())
+	}
+	client := fixture(objs...)
+	svc, _, gauge := newService(client)
+
+	res, err := svc.Delete(ctx, id)
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if want := []string{key(&own[0]), key(&own[1])}; !reflect.DeepEqual(res.Deleted, want) {
+		t.Errorf("Deleted = %v, want %v", res.Deleted, want)
+	}
+	// The action log: the only writes were deletes of our two policies.
+	var touched []string
+	for _, a := range writes(client) {
+		d, ok := a.(k8stesting.DeleteAction)
+		if !ok {
+			t.Fatalf("unexpected %s action", a.GetVerb())
+		}
+		touched = append(touched, d.GetNamespace()+"/"+d.GetName())
+	}
+	if want := []string{key(&own[0]), key(&own[1])}; !reflect.DeepEqual(touched, want) {
+		t.Errorf("writes touched %v, want only %v", touched, want)
+	}
+	for i := range others {
+		got := getPolicy(t, client, others[i].Namespace, others[i].Name)
+		if !reflect.DeepEqual(got, &others[i]) {
+			t.Errorf("survivor %s changed:\n got %+v\nwant %+v", key(&others[i]), got, &others[i])
+		}
+	}
+	for i := range own {
+		if _, err := client.NetworkingV1().NetworkPolicies(own[i].Namespace).Get(ctx, own[i].Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Errorf("%s still exists (err %v)", key(&own[i]), err)
+		}
+	}
+	if gauge.v != 2 { // "other" and "x" remain
+		t.Errorf("active gauge = %v, want 2", gauge.v)
+	}
+}
+
+func TestDelete_SendsUIDPrecondition(t *testing.T) {
+	ctx := context.Background()
+	n := Normalize(briefRequest())
+	id := ID(n)
+	// The fake does not assign UIDs either, so the fixtures carry them.
+	uids := map[string]types.UID{}
+	var objs []runtime.Object
+	for _, p := range BuildPolicies(n, id, testCIDRs) {
+		p.UID = types.UID("uid-" + p.Name)
+		uids[p.Name] = p.UID
+		objs = append(objs, p.DeepCopy())
+	}
+	client := fixture(objs...)
+	svc, _, _ := newService(client)
+
+	if _, err := svc.Delete(ctx, id); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	// The fake ignores preconditions (FINDINGS A7): this proves the tool
+	// sends one; that the API server enforces it is proven only in e2e.
+	var deletes int
+	for _, a := range writes(client) {
+		d := a.(k8stesting.DeleteAction)
+		pre := d.GetDeleteOptions().Preconditions
+		if pre == nil || pre.UID == nil || *pre.UID != uids[d.GetName()] {
+			t.Errorf("delete %s: preconditions = %+v, want UID %q", d.GetName(), pre, uids[d.GetName()])
+		}
+		deletes++
+	}
+	if deletes != 2 {
+		t.Errorf("deletes = %d, want 2", deletes)
+	}
+}
+
+func TestDelete_WorksAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	client := fixture()
+	first, _, _ := newService(client)
+	res, err := first.Create(ctx, briefRequest())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// A fresh instance shares only the cluster, as after a pod restart.
+	restarted, _, _ := newService(client)
+	del, err := restarted.Delete(ctx, res.ID)
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if !reflect.DeepEqual(del.Deleted, res.Created) {
+		t.Errorf("Deleted = %v, want %v", del.Deleted, res.Created)
+	}
+}
+
+func TestDelete_UnknownIDIsIdempotent(t *testing.T) {
+	for _, id := range []string{"0123456789", "not a label value!", ""} {
+		t.Run(id, func(t *testing.T) {
+			client := fixture()
+			svc, _, _ := newService(client)
+			res, err := svc.Delete(context.Background(), id)
+			if err != nil {
+				t.Fatalf("Delete: %v", err)
+			}
+			if len(res.Deleted) != 0 || res.Deleted == nil || res.Message == "" {
+				t.Errorf("result = %+v, want an empty list and a message", res)
+			}
+			if w := writes(client); len(w) != 0 {
+				t.Errorf("recorded writes: %v", w)
+			}
+		})
 	}
 }

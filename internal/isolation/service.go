@@ -275,3 +275,47 @@ func (s *Service) RefreshActive(ctx context.Context) error {
 func (s *Service) refreshActive(ctx context.Context) { _ = s.RefreshActive(ctx) }
 
 func key(p *networkingv1.NetworkPolicy) string { return p.Namespace + "/" + p.Name }
+
+// DeleteResult lists the policies Delete removed, by namespace/name.
+type DeleteResult struct {
+	ID      string   `json:"id"`
+	Deleted []string `json:"deleted"`
+	Message string   `json:"message,omitempty"`
+}
+
+// Delete removes every policy carrying the managed-by label and this
+// isolation ID, found by label in all namespaces, so it needs nothing from
+// memory and works after a restart (FR-ISO-07). Each delete carries the
+// listed object's UID as a precondition: if the object was replaced between
+// list and delete, the API server refuses instead of deleting the new one.
+// Deleting an unknown ID succeeds with an empty list.
+func (s *Service) Delete(ctx context.Context, id string) (DeleteResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	policies, err := s.listManaged(ctx, id)
+	if err != nil {
+		return DeleteResult{}, err
+	}
+	res := DeleteResult{ID: id, Deleted: []string{}}
+	for i := range policies {
+		p := &policies[i]
+		uid := p.UID
+		err := s.client.NetworkingV1().NetworkPolicies(p.Namespace).Delete(ctx, p.Name,
+			metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}})
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			s.refreshActive(ctx)
+			return DeleteResult{}, fmt.Errorf("delete %s (deleted so far: %v): %w", key(p), res.Deleted, err)
+		}
+		res.Deleted = append(res.Deleted, key(p))
+		s.recorder.Eventf(p, nil, corev1.EventTypeNormal, "IsolationRemoved", "Delete", "removed for isolation %s", id)
+	}
+	if len(res.Deleted) == 0 {
+		res.Message = fmt.Sprintf("no policies carry isolation ID %s; nothing to delete", id)
+	}
+	s.refreshActive(ctx)
+	return res, nil
+}
