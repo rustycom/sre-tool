@@ -1,5 +1,5 @@
 {
-  "planHash": "",
+  "planHash": "sha256:01b6e7acf45717124bce9f313ab6026f059a3de9cc51827a8c633b63663e09f8",
   "namespaces": [
     "hardening-demo",
     "hardening-lr"
