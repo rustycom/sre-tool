@@ -20,6 +20,9 @@ func TestNormalize_SidesAreCanonical(t *testing.T) {
 	if !reflect.DeepEqual(nab, nba) {
 		t.Errorf("normalised requests differ:\n a,b: %s\n b,a: %s", canonicalJSON(nab), canonicalJSON(nba))
 	}
+	if !reflect.DeepEqual(BuildPolicies(nab, ID(nab), testCIDRs), BuildPolicies(nba, ID(nba), testCIDRs)) {
+		t.Error("policies for (a,b) and (b,a) differ")
+	}
 	if got := nab.Isolate.A.Namespaces; !reflect.DeepEqual(got, []string{"tenant-a"}) {
 		t.Errorf("side a namespaces = %v, want [tenant-a] (its JSON sorts first)", got)
 	}
