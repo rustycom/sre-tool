@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -57,7 +58,7 @@ func (s *Service) Undo(ctx context.Context, namespaces []string, dryRun bool) (A
 		case dryRun:
 			s.undoDryRun(ctx, w, live, &r)
 		default:
-			stop = s.undoOne(ctx, w, live, start, &r)
+			stop = s.undoOne(ctx, w, in, start, &r)
 		}
 		s.obs.ObserveWorkload("undo", r.Status)
 		res.Results = append(res.Results, r)
@@ -75,15 +76,22 @@ func appliedBySRETool(m metav1.ObjectMeta) bool {
 	})
 }
 
-func (s *Service) undoOne(ctx context.Context, w Workload, live runtime.Object, start time.Time, r *Result) *halt {
+func (s *Service) undoOne(ctx context.Context, w Workload, in Input, start time.Time, r *Result) *halt {
 	if h := s.beforeNext(ctx, start, r); h != nil {
 		return h
+	}
+	// Re-read: earlier workloads' rollouts took time, and the diff and the
+	// gate decision below must compare against what the apply changes.
+	live, _, err := s.recheck(ctx, w, in)
+	if err != nil {
+		r.Status, r.Message = StatusFailed, err.Error()
+		return &halt{reason: "apply_failed", remedy: "run undo again"}
 	}
 	since := s.set.Now()
 	after, err := emptyPatch(w).send(ctx, s.client, false)
 	if err != nil {
 		r.Status, r.Message = StatusFailed, "undo: "+err.Error()
-		s.event(live, corev1.EventTypeWarning, "HardeningUndoFailed", r.Message)
+		s.event(live, corev1.EventTypeWarning, "HardeningFailed", r.Message)
 		return &halt{reason: "apply_failed", remedy: "nothing was changed on this workload; run undo again once the error is fixed"}
 	}
 	r.Changes = fieldDiff(templateOf(live), templateOf(after))
@@ -93,7 +101,14 @@ func (s *Service) undoOne(ctx context.Context, w Workload, live runtime.Object, 
 		r.Status, r.Message = StatusApplied, "ownership released; the pod template did not change, so nothing rolls out"
 		return nil
 	}
-	return s.gate(ctx, w, after, since, r, "HardeningUndone", fmt.Sprintf("%d fields released", len(r.Changes)))
+	h := s.gate(ctx, w, after, since, r, "HardeningUndone", fmt.Sprintf("%d fields released", len(r.Changes)))
+	if h != nil && h.reason == "rollout_failed" {
+		// sre-tool owns nothing here any more, so another undo skips this
+		// workload. Rolling back restores the hardened template, which ran.
+		h.remedy = fmt.Sprintf("the unhardened template does not roll out; kubectl -n %s rollout undo %s/%s restores the hardened one (no longer owned by sre-tool)",
+			w.Namespace, strings.ToLower(w.Kind), w.Name)
+	}
+	return h
 }
 
 // undoDryRun fills r with what undo would change. A failure is recorded on

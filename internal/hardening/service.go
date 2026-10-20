@@ -169,7 +169,7 @@ func (s *Service) Apply(ctx context.Context, namespaces []string, planHash strin
 // inProgress is the 409 for a second apply or undo while one is running.
 func inProgress() *Error {
 	return &Error{Status: http.StatusConflict, Code: "apply_in_progress",
-		Message: "another apply or undo is running; wait for it to finish, then plan again"}
+		Message: "another apply or undo is running; wait for it to finish, then try again"}
 }
 
 // applyOne runs the per-workload steps of SPEC §7.7 and fills r. It returns
