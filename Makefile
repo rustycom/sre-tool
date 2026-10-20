@@ -85,8 +85,11 @@ undeploy: ## Remove the tool (isolation policies stay in their namespaces)
 port-forward: ## Expose the tool's API on localhost:8080
 	$(KUBECTL) -n sre-tool port-forward deploy/sre-tool 8080:8080
 
+e2e-isolation: ## Isolation connectivity matrix against kind (needs deploy)
+	hack/verify-isolation.sh
+
 # Implemented later in Phase 3; failing loudly beats silently doing nothing.
-e2e-isolation e2e-rbac: ## (Phase 3)
+e2e-rbac: ## (Phase 3)
 	@echo "$@: not implemented yet (Phase 3)"; exit 1
 run-local: ## Run the tool on this machine against the kind cluster (API on 127.0.0.1:8080)
 	go run ./cmd/sre-tool --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)
