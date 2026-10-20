@@ -1,0 +1,8 @@
+# Restricted Pod Security: the API server itself rejects a weaker pod spec for the tool.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sre-tool
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

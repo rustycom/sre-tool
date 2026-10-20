@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sre-tool
+  namespace: sre-tool
+  labels: {app: sre-tool}
+spec:
+  # One replica, and Recreate so a rollout never runs two: the isolation mutex and the
+  # apply lock are in-process (ADR-012).
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: sre-tool}
+  template:
+    metadata:
+      labels: {app: sre-tool}
+    spec:
+      serviceAccountName: sre-tool
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: sre-tool
+        image: sre-tool:dev # replaced by `make deploy` with sre-tool:<git sha>
+        imagePullPolicy: IfNotPresent
+        env:
+        # The tool protects its own namespace (SPEC §4) and must know which one it is.
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        ports:
+        # The API (8080) binds to 127.0.0.1 and is reached only through port-forward
+        # (SPEC §10.1), so it is not a container port.
+        - name: ops
+          containerPort: 8081
+        livenessProbe:
+          httpGet: {path: /healthz, port: ops}
+          periodSeconds: 10
+        readinessProbe:
+          httpGet: {path: /readyz, port: ops}
+          periodSeconds: 5
+        # No CPU limit, the same rule the tool applies to others (ADR-007).
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            memory: 128Mi
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]

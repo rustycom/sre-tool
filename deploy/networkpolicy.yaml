@@ -1,0 +1,15 @@
+# Ingress only on the ops port. Port-forward to the loopback API does not pass through the
+# CNI, so this policy does not affect it (FINDINGS A9).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sre-tool
+  namespace: sre-tool
+spec:
+  podSelector:
+    matchLabels: {app: sre-tool}
+  policyTypes: [Ingress]
+  ingress:
+  - ports:
+    - protocol: TCP
+      port: 8081

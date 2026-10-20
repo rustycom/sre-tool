@@ -1,0 +1,12 @@
+# Ops port only (health and metrics). The API is never exposed as a Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sre-tool
+  namespace: sre-tool
+spec:
+  selector: {app: sre-tool}
+  ports:
+  - name: ops
+    port: 8081
+    targetPort: ops

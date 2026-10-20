@@ -8,7 +8,9 @@ KUBECTL := kubectl --kubeconfig $(KUBECONFIG_FILE) --context $(KCTX)
 HELM    := helm --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)
 export CLUSTER KCTX KUBECONFIG_FILE
 
-VERSION ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
+# --dirty: a rebuild after an uncommitted edit gets a new tag, so deploy rolls it out.
+VERSION ?= $(shell git describe --always --dirty 2>/dev/null || echo dev)
+IMAGE   ?= sre-tool:$(VERSION)
 # Pinned tools live in ./bin (gitignored), so local runs and CI use the same binaries.
 GOLANGCI_LINT_VERSION := 2.14.0
 GOVULNCHECK_VERSION   := 1.8.0
@@ -67,9 +69,29 @@ workloads: ## Apply the sample workloads and wait until they are ready
 	$(KUBECTL) -n hardening-demo wait --for=condition=Complete job/once --timeout=120s
 	$(KUBECTL) -n hardening-demo wait --for=condition=Ready pod/bare-pod --timeout=120s
 
-# Implemented in later phases; failing loudly beats silently doing nothing.
-image kind-load deploy undeploy port-forward e2e-isolation e2e-rbac: ## (Phase 3)
-	@echo "$@: not implemented yet (Phase 3)"; exit 1
+image: ## Build the container image sre-tool:<git sha>
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE) .
+
+kind-load: ## Load the image into the kind cluster
+	kind load docker-image $(IMAGE) --name $(CLUSTER)
+
+# The manifests name sre-tool:dev; one apply with the real tag avoids a second rollout.
+deploy: ## Deploy the tool (image sre-tool:<git sha>) and wait until it is Available
+	$(KUBECTL) kustomize deploy/ | sed 's|image: sre-tool:dev|image: $(IMAGE)|' | $(KUBECTL) apply -f -
+	$(KUBECTL) -n sre-tool rollout status deploy/sre-tool --timeout=120s
+
+undeploy: ## Remove the tool (isolation policies stay in their namespaces)
+	$(KUBECTL) delete -k deploy/ --ignore-not-found
+
+port-forward: ## Expose the tool's API on localhost:8080
+	$(KUBECTL) -n sre-tool port-forward deploy/sre-tool 8080:8080
+
+e2e-isolation: ## Isolation connectivity matrix against kind (needs deploy)
+	hack/verify-isolation.sh
+
+e2e-rbac: ## Check what the tool's ServiceAccount may and may not do
+	hack/verify-rbac.sh
+
 run-local: ## Run the tool on this machine against the kind cluster (API on 127.0.0.1:8080)
 	go run ./cmd/sre-tool --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)
 e2e-hardening: ## (Phase 5)
