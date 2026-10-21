@@ -1,6 +1,6 @@
 // Package metrics holds the tool's Prometheus collectors on a dedicated
 // registry, so nothing registered by a library leaks into /metrics
-// unannounced (SPEC §9). Label values are bounded: routes are patterns, and
+// unannounced. Label values are bounded: routes are patterns, and
 // no label carries an isolation ID or a raw path.
 package metrics
 

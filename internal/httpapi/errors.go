@@ -24,7 +24,7 @@ type errorDetail struct {
 	Details map[string]any `json:"details"`
 }
 
-// writeError maps err to the SPEC §5.2 error shape. Typed request errors keep
+// writeError maps err to the JSON error shape. Typed request errors keep
 // their status and code; anything else is an unexpected failure, usually a
 // Kubernetes API error, and becomes 500 internal. Its text goes to the log,
 // not to the client.
@@ -58,7 +58,7 @@ func writeError(logger *slog.Logger, w http.ResponseWriter, r *http.Request, err
 	writeJSON(w, status, errorBody{Error: d})
 }
 
-// retryable reports timeouts and 5xx responses from the API server (SPEC §8):
+// retryable reports timeouts and 5xx responses from the API server:
 // failures that a retry of the same idempotent request may get past.
 func retryable(err error) bool {
 	var st apierrors.APIStatus

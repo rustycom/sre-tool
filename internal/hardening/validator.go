@@ -10,8 +10,8 @@ import (
 )
 
 // Validator runs the server-side dry-run of the exact apply that apply would
-// send (SPEC §7.6). It is an interface because the fake clientset ignores
-// DryRun and persists the change (FINDINGS A7): unit tests fake it, and the
+// send. It is an interface because the fake clientset ignores
+// DryRun and persists the change: unit tests fake it, and the
 // real one runs only against a real API server.
 type Validator interface {
 	// DryRun returns the object as it would be after the apply.
@@ -31,7 +31,7 @@ func (v ClientValidator) DryRun(ctx context.Context, p Patch) (runtime.Object, e
 
 // validatePlan dry-runs every patch workload and records the outcome in
 // dryRun. A failure keeps the action patch, so the operator sees what was
-// intended, but apply refuses that workload (SPEC §7.6).
+// intended, but apply refuses that workload.
 func validatePlan(ctx context.Context, v Validator, plan *Plan, in Input) {
 	for i := range plan.Workloads {
 		w := &plan.Workloads[i]

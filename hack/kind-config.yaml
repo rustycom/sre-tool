@@ -5,10 +5,10 @@ name: sre-tool
 networking:
   # kindnet does not enforce NetworkPolicy; Cilium is installed instead (hack/install-cilium.sh).
   disableDefaultCNI: true
-  # Must match the --pod-cidrs default (SPEC §4) used in the isolation ipBlock except list.
+  # Must match the --pod-cidrs default used in the isolation ipBlock except list.
   podSubnet: 10.244.0.0/16
 nodes:
-# Node image for kind v0.32.0, pinned by digest (docs/VERSIONS.md).
+# Node image for kind v0.32.0, pinned by digest.
 - role: control-plane
   image: kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
 - role: worker

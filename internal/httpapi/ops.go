@@ -8,7 +8,7 @@ import (
 )
 
 // readyWindow is how recent the last successful API server probe must be
-// for /readyz to pass (SPEC §8).
+// for /readyz to pass.
 const readyWindow = 10 * time.Second
 
 // Readiness caches the result of an API server probe, so /readyz answers
@@ -54,7 +54,7 @@ func (r *Readiness) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// ShutDown makes the tool unready for good: the first shutdown step (SPEC §9).
+// ShutDown makes the tool unready for good: the first shutdown step.
 func (r *Readiness) ShutDown() {
 	r.mu.Lock()
 	defer r.mu.Unlock()

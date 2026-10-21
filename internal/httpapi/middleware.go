@@ -43,7 +43,7 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 
 // routeOf turns a ServeMux pattern ("GET /v1/isolations/{id}") into the route
 // label ("/v1/isolations/{id}"). Using the pattern, never the raw path, keeps
-// log fields and metric labels bounded (SPEC §5.3, §9).
+// log fields and metric labels bounded.
 func routeOf(pattern string) string {
 	if _, path, ok := strings.Cut(pattern, " "); ok {
 		return path

@@ -1,5 +1,5 @@
 // Package config parses and validates the tool's flags and environment
-// variables (SPEC §4). Invalid configuration fails startup.
+// variables. Invalid configuration fails startup.
 package config
 
 import (
@@ -16,7 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// WriteTimeout is the API server's write timeout (SPEC §8). It is long
+// WriteTimeout is the API server's write timeout. It is long
 // because apply is synchronous; an apply budget at or above it would let the
 // HTTP response time out while apply carries on.
 const WriteTimeout = 15 * time.Minute

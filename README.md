@@ -103,7 +103,7 @@ curl -s -X DELETE localhost:8080/v1/isolations/59957de534 | jq
 {"id": "59957de534", "deleted": ["tenant-a/sre-iso-59957de534-a", "tenant-b/sre-iso-59957de534-b"]}
 ```
 
-A request whose sides already have an unrelated ingress policy is refused with 409 `conflicting_policies`, because NetworkPolicies are additive and that policy would either let the other side in or be widened by ours. Adding `force: true` proceeds, records `forced`, and emits a Warning event. Try it with tenant-c, which has such a policy:
+A request whose sides already have an unrelated ingress policy is refused with 409 `conflicting_policies`, because NetworkPolicies are additive and that policy would either let the other side in or be widened by ours. Adding `force: true` proceeds, records `forced`, and emits a Warning event. `force` never overrides a conflict with another sre-tool isolation on the same pods: the two would cancel each other, so that is a 409 `isolation_overlap`. If a side matches no running pod (usually a typo in the selector), the policies are still created, because a side may be scaled to zero on purpose, but the response carries a warning. Try it with tenant-c, which has such a policy:
 
 ```sh
 curl -s -X POST -H 'Content-Type: application/yaml' localhost:8080/v1/isolations --data-binary '
@@ -247,7 +247,7 @@ The brief left these open. Each answer below is the short version of a decision 
 **How isolation behaves as pods come and go.** Isolation is two ingress NetworkPolicies, one per side, each admitting "everything except the other side". The CNI evaluates label selectors live, so a new pod matching a side is isolated the moment it exists, and a pod relabelled out of a side leaves it, with no action from the tool. New namespaces are covered by a `NotIn` namespace peer. The tool keeps no state of its own: the ID, request and expected policy count live in labels and annotations on the policies. If the tool crashes, isolation stays on (fail-closed), and DELETE works after a restart because it lists by label.
 - *Why ingress-only on both sides:* a new connection in either direction needs the receiver's ingress to admit it, and replies on allowed connections are stateful. Leaving egress alone keeps DNS and everything else working.
 - *Why "everything except B" instead of "deny B":* standard NetworkPolicy has no deny. The complement of B's selector is built with De Morgan (`{app: x, tier: y}` becomes `app NotIn [x]` OR `tier NotIn [y]`), and an `ipBlock 0.0.0.0/0 except <pod CIDR>` peer keeps node and external traffic working.
-- *Why refuse on conflict:* policies are OR'd. An existing ingress policy on either side would either admit the other side or be widened by ours, and a second isolation on the same pods would cancel the first. So the tool returns 409 and lists them; `force: true` overrides it and is recorded.
+- *Why refuse on conflict:* policies are OR'd. An existing ingress policy on either side would either admit the other side or be widened by ours, So the tool returns 409 and lists them; `force: true` overrides it and is recorded. A second isolation on the same pods would cancel the first, so that conflict cannot be forced.
 - *Why no rollback on partial failure:* half an isolation is better containment than none, and a retried POST completes the set.
 
 **What counts as a hardened `securityContext`.** By default the tool sets only what cannot break a correctly written workload: pod `seccompProfile: RuntimeDefault` and container `allowPrivilegeEscalation: false`. `runAsNonRoot: true`, `capabilities.drop: [ALL]` and `readOnlyRootFilesystem: true` break many real images (root nginx, apps that write to `/tmp`), and the API can't tell in advance, so they are reported as findings and applied only with the `strict` annotation, behind the rollout gate. Values that are set are never changed, including `false`, `Unconfined` and `privileged: true`. `allowPrivilegeEscalation` is skipped for privileged or `SYS_ADMIN` containers, because API validation rejects that combination.
@@ -353,10 +353,14 @@ Each of the three was checked by breaking the code on purpose and watching it fa
 
 ## 10. Time taken and feedback on the brief
 
-<!-- AUTHOR: time taken, from docs/TIMELOG.md (honest total, and how it split across phases) -->
+**Time taken:** _AUTHOR: fill in the honest total and how it split across phases._ The design estimated about 7 hours for the core, above the brief's 4 to 6.
 
-<!-- AUTHOR: feedback on the brief: anything unclear or inconsistent, in your own words -->
+**Feedback on the brief:**
+
+- "Block A and B while all other traffic keeps working" cannot always be expressed with standard NetworkPolicy. It has no deny, so when either side already has ingress policies (a default-deny is common in multi-tenant clusters), adding "everything except B" either fails to block or widens access. Saying which policy API is in scope would help.
+- One-shot hardening is reverted by the next deploy or by GitOps. In production the answer is admission control; it may be worth saying whether the tool is meant as a migration aid or the enforcement mechanism.
+- "Turning it off should restore the previous connectivity" is ambiguous for connections that were cut during isolation. New connections work again, but whether a stalled connection recovers depends on the CNI and on TCP retransmission.
 
 ## 11. AI assistance
 
-<!-- AUTHOR: AI-assistance statement: which tools you used, for what, and how you checked the output -->
+I used Claude Code as an assistant for drafting code, tests and documentation, and for reviewing the result. I checked the output by running the unit tests with the race detector, the linters and govulncheck, and the three end-to-end scripts against the kind cluster, and by breaking each of the three tricky tests on purpose to see them fail.

@@ -19,7 +19,7 @@ import (
 
 // appliedFixture is newFixture after a complete apply: a, b and c are
 // hardened and sre-tool owns the fields it set. The fake clientset runs real
-// server-side apply field ownership (FINDINGS A7), which is what undo uses.
+// server-side apply field ownership, which is what undo uses.
 func appliedFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := newFixture(t)
@@ -44,7 +44,7 @@ func (f *fixture) deployment(t *testing.T, name string) *appsv1.Deployment {
 func TestUndo_RemovesOnlyOwnedFields(t *testing.T) {
 	f := appliedFixture(t)
 	// A human changes one tool-set field after apply, as `kubectl set
-	// resources` does. An update takes ownership of a changed field (I-16), so
+	// resources` does. An update takes ownership of a changed field, so
 	// sre-tool no longer owns requests.cpu on a.
 	a := f.deployment(t, "a")
 	a.Spec.Template.Spec.Containers[0].Resources.Requests[corev1.ResourceCPU] = resource.MustParse("200m")
@@ -135,7 +135,7 @@ func TestUndo_SecondUndoChangesNothing(t *testing.T) {
 
 func TestUndo_DryRunWritesNothing(t *testing.T) {
 	f := appliedFixture(t)
-	// The fake clientset would persist a dry-run (FINDINGS A7), so it goes
+	// The fake clientset would persist a dry-run, so it goes
 	// through the faked validator. b's result stands in for the API server's
 	// answer: everything sre-tool set is gone.
 	f.validator.got = nil

@@ -9,13 +9,13 @@ import (
 )
 
 // namespaceNameLabel is set by the API server on every namespace and cannot
-// be changed (k8s-invariants I-4), so it safely targets a namespace by name.
+// be changed, so it safely targets a namespace by name.
 const namespaceNameLabel = "kubernetes.io/metadata.name"
 
 // Negate returns the requirement that matches exactly the pods r does not:
 // In ↔ NotIn and Exists ↔ DoesNotExist, values unchanged. NotIn and
 // DoesNotExist also match pods without the key, which is what negating In and
-// Exists needs (I-3).
+// Exists needs.
 func Negate(r metav1.LabelSelectorRequirement) metav1.LabelSelectorRequirement {
 	negated := map[metav1.LabelSelectorOperator]metav1.LabelSelectorOperator{
 		metav1.LabelSelectorOpIn:           metav1.LabelSelectorOpNotIn,
@@ -29,7 +29,7 @@ func Negate(r metav1.LabelSelectorRequirement) metav1.LabelSelectorRequirement {
 // ComplementPeers returns peers that together admit every pod in namespace
 // that side's selector does not select. By De Morgan, ¬(r1 ∧ r2) = ¬r1 ∨ ¬r2:
 // one peer per negated requirement, and peers are OR'd. Each peer pairs the
-// namespace and pod selectors in one entry, so they are AND'd (I-2).
+// namespace and pod selectors in one entry, so they are AND'd.
 // An empty selector selects every pod, so its complement is no peers at all.
 func ComplementPeers(namespace string, side Side) []networkingv1.NetworkPolicyPeer {
 	var peers []networkingv1.NetworkPolicyPeer

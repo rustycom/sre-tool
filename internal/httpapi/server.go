@@ -1,4 +1,4 @@
-// Package httpapi serves the tool's HTTP API (SPEC §8) and its ops endpoints.
+// Package httpapi serves the tool's HTTP API and its ops endpoints.
 package httpapi
 
 import (
@@ -15,10 +15,10 @@ import (
 	"github.com/rustycom/sre-tool/internal/isolation"
 )
 
-// maxBodyBytes caps request bodies (SPEC §8).
+// maxBodyBytes caps request bodies.
 const maxBodyBytes = 1 << 20
 
-// NewServer returns a server with the SPEC §8 timeouts. Handlers' contexts
+// NewServer returns a server with the API timeouts. Handlers' contexts
 // derive from base, so cancelling base cancels in-flight work at shutdown.
 func NewServer(base context.Context, addr string, h http.Handler) *http.Server {
 	return &http.Server{

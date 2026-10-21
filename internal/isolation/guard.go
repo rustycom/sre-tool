@@ -19,7 +19,7 @@ type Cluster struct {
 	Pods       []corev1.Pod    // pods in the request's namespaces
 }
 
-// CheckGuards applies the cluster-dependent rules of FR-ISO-03 in SPEC order;
+// CheckGuards applies the cluster-dependent guard rules in a fixed order;
 // the first failure wins. name_conflict needs the existing isolations and is
 // checked by the service.
 func CheckGuards(normalized Request, c Cluster) error {
@@ -56,7 +56,7 @@ func CheckGuards(normalized Request, c Cluster) error {
 // checkOverlap refuses sides that select the same pod: its policies would
 // block the pod from itself and its peers on both sides, which is never what
 // an operator means. Selectors that only overlap for pods created later are
-// not detected (SPEC §14).
+// not detected.
 func checkOverlap(a, b Side, pods []corev1.Pod) error {
 	overlap := func(details map[string]any) error {
 		return &Error{Status: http.StatusUnprocessableEntity, Code: "overlapping_sides",

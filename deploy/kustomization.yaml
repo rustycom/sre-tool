@@ -1,4 +1,4 @@
-# The tool's own deployment (SPEC §10, §11). `make deploy` applies this with the image set to
+# The tool's own deployment. `make deploy` applies this with the image set to
 # the current git SHA.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

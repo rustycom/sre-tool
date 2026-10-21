@@ -28,7 +28,7 @@ var version = "dev"
 
 const (
 	readinessInterval = 5 * time.Second
-	shutdownGrace     = 25 * time.Second // SPEC §9: in-flight requests get up to 25s
+	shutdownGrace     = 25 * time.Second // in-flight requests get up to 25s
 	startupAttempts   = 5
 	apiCallTimeout    = 30 * time.Second
 )
@@ -121,7 +121,7 @@ func run() error {
 	case runErr = <-errc:
 	}
 
-	// SPEC §9: readiness goes false, listeners stop, in-flight requests get
+	// Shutdown: readiness goes false, listeners stop, in-flight requests get
 	// the grace period, then their contexts are cancelled.
 	ready.ShutDown()
 	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)

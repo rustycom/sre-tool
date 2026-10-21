@@ -12,7 +12,7 @@ import (
 
 const idHexLen = 10
 
-// Normalize returns the canonical form of a validated request (FR-ISO-02):
+// Normalize returns the canonical form of a validated request:
 // namespace folded into namespaces, namespaces de-duplicated and sorted,
 // expressions sorted by (key, operator, values) with sorted, de-duplicated values, and the side whose
 // canonical JSON sorts first as side a. Equivalent requests therefore get the
@@ -72,7 +72,7 @@ func canonicalJSON(v any) string {
 }
 
 // Identity is the canonical JSON of what the isolation does: the normalised
-// isolate block plus allowEmptySelector, without name and force (SPEC §6.2).
+// isolate block plus allowEmptySelector, without name and force.
 // It is stored in the sre-tool.io/request annotation, so name_conflict and
 // drift checks compare two strings.
 func Identity(normalized Request) string {
@@ -90,7 +90,7 @@ func ID(normalized Request) string {
 }
 
 // PolicyName is the name of the policy protecting side ("a" or "b"). With a
-// name of at most 40 characters it stays well inside 63 (FR-ISO-02).
+// name of at most 40 characters it stays well inside 63.
 func PolicyName(id, side string) string {
 	return "sre-iso-" + id + "-" + side
 }

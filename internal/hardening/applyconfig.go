@@ -27,13 +27,13 @@ type Patch struct {
 
 // BuildPatch builds the apply configuration for a patch workload from its
 // live object: the fields sre-tool already owns there, plus the planned
-// changes, plus the container names that key them (I-15).
+// changes, plus the container names that key them.
 //
 // Starting from what sre-tool owns is required, not cosmetic: an apply
-// removes every field its manager owned and no longer sends (I-17), so a
+// removes every field its manager owned and no longer sends, so a
 // configuration with only the new changes would strip earlier hardening
 // (moving a workload to strict would drop its seccomp profile and resource
-// defaults). Nothing owned by another manager is included (ADR-019).
+// defaults). Nothing owned by another manager is included.
 func BuildPatch(w Workload, live runtime.Object) (Patch, error) {
 	p := Patch{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name}
 	tpl, err := p.extract(live)
@@ -117,9 +117,9 @@ func (p *Patch) extract(live runtime.Object) (*corev1ac.PodTemplateSpecApplyConf
 }
 
 // send applies the patch with force: false, so a field another manager owns
-// with a different value is a Conflict rather than a silent takeover (I-16).
+// with a different value is a Conflict rather than a silent takeover.
 // dryRun asks the API server to run validation and admission without
-// persisting anything (SPEC §7.6).
+// persisting anything.
 func (p Patch) send(ctx context.Context, c kubernetes.Interface, dryRun bool) (runtime.Object, error) {
 	opts := metav1.ApplyOptions{FieldManager: FieldManager, Force: false}
 	if dryRun {

@@ -124,7 +124,7 @@ func TestCreate_Idempotent(t *testing.T) {
 	if len(res.Created) != 0 || len(res.Repaired) != 0 || len(res.Unchanged) != 2 {
 		t.Errorf("result = %+v, want 2 unchanged only", res)
 	}
-	// The fake never sets resourceVersion (FINDINGS A7), so only the action
+	// The fake never sets resourceVersion, so only the action
 	// log can prove that the second call wrote nothing.
 	if w := writes(client); len(w) != 0 {
 		t.Errorf("second call recorded writes: %v", w)
@@ -208,7 +208,7 @@ func TestCreate_NamedRequestWithDifferentIdentityConflicts(t *testing.T) {
 	_, err := svc.Create(ctx, other)
 	wantError(t, err, http.StatusConflict, "name_conflict")
 
-	// Same identity with force added is not a name conflict (SPEC §6.2).
+	// Same identity with force added is not a name conflict.
 	req.Force = true
 	if _, err := svc.Create(ctx, req); err != nil {
 		t.Errorf("same identity with force: %v", err)
@@ -362,7 +362,7 @@ func TestDelete_SendsUIDPrecondition(t *testing.T) {
 	if _, err := svc.Delete(ctx, id); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	// The fake ignores preconditions (FINDINGS A7): this proves the tool
+	// The fake ignores preconditions: this proves the tool
 	// sends one; that the API server enforces it is proven only in e2e.
 	var deletes int
 	for _, a := range writes(client) {
@@ -519,5 +519,80 @@ func TestDelete_ContinuesPastFailure(t *testing.T) {
 	// Side b's policy was still removed: turning off removes what it can.
 	if _, err := client.NetworkingV1().NetworkPolicies("tenant-b").Get(ctx, PolicyName(id, "b"), metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Errorf("tenant-b policy still exists (err %v)", err)
+	}
+}
+
+// A typo in a selector must not look like success: Create still writes the
+// policies (a side may be scaled to zero on purpose) but says that side
+// matches no running pod.
+func TestCreate_WarnsWhenASideMatchesNoPods(t *testing.T) {
+	svc, _, _ := newService(fixture())
+	req := briefRequest()
+	req.Isolate.A.Selector = map[string]string{"app": "gatway"}
+
+	res, err := svc.Create(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(res.Created) != 2 {
+		t.Errorf("created = %v, want both policies", res.Created)
+	}
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "side a matches 0 running pods") {
+		t.Errorf("warnings = %v, want one zero-match warning for side a", res.Warnings)
+	}
+}
+
+// Two isolations on the same pods cancel each other (policies are OR'd), so
+// a conflict with another isolation is refused even with force.
+func TestCreate_RefusesOverlapWithAnotherIsolationEvenWithForce(t *testing.T) {
+	ctx := context.Background()
+	client := fixture()
+	svc, _, _ := newService(client)
+	first, err := svc.Create(ctx, briefRequest())
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+	before := len(writes(client))
+
+	second := Request{Force: true, Isolate: Pair{
+		A: &Side{Namespace: "tenant-a", Selector: map[string]string{"app": "gateway"}},
+		B: &Side{Namespace: "tenant-b", Selector: map[string]string{"app": "other"}},
+	}}
+	_, err = svc.Create(ctx, second)
+	details := wantError(t, err, http.StatusConflict, "isolation_overlap")
+	if got := details["isolations"]; !reflect.DeepEqual(got, []string{first.ID}) {
+		t.Errorf("details.isolations = %v, want [%s]", got, first.ID)
+	}
+	if after := len(writes(client)); after != before {
+		t.Errorf("refused Create wrote %d objects", after-before)
+	}
+}
+
+// Turning isolation off part-way must say what was removed and what is still
+// in effect, as a typed error the HTTP layer can show, not a bare 500.
+func TestDelete_PartialFailureReportsDeletedAndFailed(t *testing.T) {
+	ctx := context.Background()
+	n := Normalize(briefRequest())
+	id := ID(n)
+	var objs []runtime.Object
+	for _, p := range BuildPolicies(n, id, testCIDRs) {
+		objs = append(objs, p.DeepCopy())
+	}
+	client := fixture(objs...)
+	client.PrependReactor("delete", "networkpolicies", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if a.GetNamespace() == "tenant-a" {
+			return true, nil, errors.New("injected API failure")
+		}
+		return false, nil, nil
+	})
+	svc, _, _ := newService(client)
+
+	_, err := svc.Delete(ctx, id)
+	details := wantError(t, err, http.StatusInternalServerError, "partial_delete")
+	if got := details["deleted"]; !reflect.DeepEqual(got, []string{"tenant-b/" + PolicyName(id, "b")}) {
+		t.Errorf("details.deleted = %v", got)
+	}
+	if got, _ := details["failed"].([]string); len(got) != 1 || !strings.HasPrefix(got[0], "tenant-a/"+PolicyName(id, "a")) {
+		t.Errorf("details.failed = %v", details["failed"])
 	}
 }

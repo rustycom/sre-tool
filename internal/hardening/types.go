@@ -1,11 +1,11 @@
 // Package hardening plans and applies securityContext and resource defaults
-// to workloads (SPEC §7). The planner is pure: it works on typed objects that
+// to workloads. The planner is pure: it works on typed objects that
 // a collector fetched, and makes no API calls.
 package hardening
 
 import "k8s.io/apimachinery/pkg/types"
 
-// Annotations read by the planner (SPEC §5.1).
+// Annotations read by the planner.
 const (
 	SkipAnnotation    = "sre-tool.io/skip"
 	ProfileAnnotation = "sre-tool.io/harden-profile"
@@ -15,7 +15,7 @@ const (
 // Action is what apply would do with a workload.
 type Action string
 
-// The actions, as they appear in plan and apply responses (SPEC §7.4).
+// The actions, as they appear in plan and apply responses.
 const (
 	ActionPatch  Action = "patch"
 	ActionNone   Action = "none" // already compliant
@@ -23,7 +23,7 @@ const (
 	ActionSkip   Action = "skip"
 )
 
-// Plan is the response of POST /v1/hardening/plan (SPEC §7.4).
+// Plan is the response of POST /v1/hardening/plan.
 type Plan struct {
 	PlanHash   string     `json:"planHash"`
 	Namespaces []string   `json:"namespaces"`
@@ -52,7 +52,7 @@ type Workload struct {
 	Changes       []Change  `json:"changes,omitempty"`
 	Findings      []Finding `json:"findings"`
 
-	// Inputs to the plan hash (SPEC §7.5), not part of the response.
+	// Inputs to the plan hash, not part of the response.
 	UID          types.UID `json:"-"`
 	TemplateHash string    `json:"-"`
 }
@@ -65,7 +65,7 @@ type Change struct {
 	// because container names are unique across both lists anyway.
 	Init  bool   `json:"-"`
 	Field string `json:"field"`
-	// From is always null: rules fill unset fields only (SPEC §7.3). It is
+	// From is always null: rules fill unset fields only. It is
 	// kept so the response shows the before and after side by side.
 	From any `json:"from"`
 	To   any `json:"to"`

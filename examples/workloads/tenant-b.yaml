@@ -1,4 +1,4 @@
-# Isolation tenant B (SPEC §12). app=dashboard is the brief's side b.
+# Isolation tenant B. app=dashboard is the brief's side b.
 apiVersion: v1
 kind: Namespace
 metadata:

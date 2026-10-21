@@ -1,4 +1,4 @@
-# Isolation tenant A (SPEC §12). The brief's example isolates app=gateway from tenant-b/app=dashboard.
+# Isolation tenant A. The brief's example isolates app=gateway from tenant-b/app=dashboard.
 # The readiness probes double as the A3 check: kubelet probes must keep passing during isolation.
 apiVersion: v1
 kind: Namespace

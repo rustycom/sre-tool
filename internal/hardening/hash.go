@@ -8,8 +8,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// templateHash is the SHA-256 of the canonical JSON of what apply would patch
-// (SPEC §7.5). encoding/json writes struct fields in declaration order and map
+// templateHash is the SHA-256 of the canonical JSON of what apply would patch.
+// encoding/json writes struct fields in declaration order and map
 // keys sorted, so equal templates give equal bytes.
 func templateHash(template any) string {
 	return sha256Hex(canonicalJSON(template))
@@ -17,7 +17,7 @@ func templateHash(template any) string {
 
 // planHash covers every listed workload, in plan order. It leaves out
 // resourceVersion and generation on purpose: status writes, HPAs and
-// `kubectl scale` bump those without changing what apply would patch (I-18),
+// `kubectl scale` bump those without changing what apply would patch,
 // and the hash would flap. Finding text is left out too.
 func planHash(ws []Workload) string {
 	type entry struct {

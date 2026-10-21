@@ -19,10 +19,10 @@ import (
 )
 
 // Undo releases every field sre-tool owns on the workloads it hardened in
-// namespaces (SPEC §7.9). It needs no stored snapshot: server-side apply
+// namespaces. It needs no stored snapshot: server-side apply
 // already records what sre-tool owns. Applying an empty configuration as
 // sre-tool removes the fields only sre-tool owns and keeps those a human or
-// another manager has since changed or co-owns (I-17).
+// another manager has since changed or co-owns.
 //
 // It runs one workload at a time with the same rollout gate, halt and budget
 // rules as apply. With dryRun, every apply is a server-side dry-run and the
@@ -95,7 +95,7 @@ func (s *Service) undoOne(ctx context.Context, w Workload, in Input, start time.
 		return &halt{reason: "apply_failed", remedy: "nothing was changed on this workload; run undo again once the error is fixed"}
 	}
 	r.Changes = fieldDiff(templateOf(live), templateOf(after))
-	// Only a template change rolls pods out (I-9). When every released field
+	// Only a template change rolls pods out. When every released field
 	// is still owned by someone else, there is nothing to wait for.
 	if reflect.DeepEqual(templateOf(live), templateOf(after)) {
 		r.Status, r.Message = StatusApplied, "ownership released; the pod template did not change, so nothing rolls out"

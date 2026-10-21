@@ -13,13 +13,13 @@ import (
 	"k8s.io/client-go/tools/events"
 )
 
-// ReportingController names the tool on every Event it emits (SPEC §9).
+// ReportingController names the tool on every Event it emits.
 const ReportingController = "sre-tool"
 
 // RESTConfig returns the in-cluster config when kubeconfig is empty.
 // Otherwise it loads only that file and only the named context, which must
 // exist in it: the author's machine has real clusters, so the tool never
-// falls back to the current context (CLAUDE.md, SPEC §4).
+// falls back to the current context.
 func RESTConfig(kubeconfig, kubeContext string) (*rest.Config, error) {
 	if kubeconfig == "" {
 		cfg, err := rest.InClusterConfig()

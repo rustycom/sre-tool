@@ -44,7 +44,7 @@ func toYAML(t *testing.T, policies []networkingv1.NetworkPolicy) []byte {
 }
 
 // TestBuild_BriefExampleGolden compares against testdata, which was checked by
-// hand against SPEC §6.5. Regenerate with -update and review the diff.
+// hand against the policy shape described in builder.go. Regenerate with -update and review the diff.
 func TestBuild_BriefExampleGolden(t *testing.T) {
 	got := toYAML(t, build(t, briefRequest()))
 	path := filepath.Join("testdata", "brief-example.golden.yaml")

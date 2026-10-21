@@ -25,7 +25,7 @@ import (
 type Gauge interface{ Set(float64) }
 
 // Service creates, removes and reports isolations. It keeps no state of its
-// own: everything it returns is read back from the cluster (NFR-STATE-01).
+// own: everything it returns is read back from the cluster.
 type Service struct {
 	client    kubernetes.Interface
 	recorder  events.EventRecorder
@@ -34,12 +34,12 @@ type Service struct {
 	active    Gauge
 
 	// mu serialises mutations, so a create and a delete of the same isolation
-	// cannot interleave. They are fast, so callers wait (SPEC §8).
+	// cannot interleave. They are fast, so callers wait.
 	mu sync.Mutex
 }
 
 // NewService returns a Service. podCIDRs go into every policy's ipBlock
-// except list; protected namespaces are refused (FR-ISO-03); active is set to
+// except list; protected namespaces are refused; active is set to
 // the number of isolations in the cluster after every mutation.
 func NewService(client kubernetes.Interface, recorder events.EventRecorder, podCIDRs []string, protected map[string]bool, active Gauge) *Service {
 	return &Service{client: client, recorder: recorder, podCIDRs: podCIDRs, protected: protected, active: active}
@@ -54,7 +54,7 @@ type CreateResult struct {
 	Warnings  []string `json:"warnings,omitempty"`
 }
 
-// Create applies a validated request (FR-ISO-06): guards, name check and
+// Create applies a validated request: guards, name check and
 // preflight first, then an ownership check of every target name before any
 // write, then create or repair each policy. A partial failure keeps what was
 // created: partial containment beats none, and a retry completes the set.
@@ -93,12 +93,33 @@ func (s *Service) Create(ctx context.Context, req Request) (CreateResult, error)
 
 	res := CreateResult{ID: id, Created: []string{}, Repaired: []string{}, Unchanged: []string{}}
 	conflicts := Preflight(n, id, existing, cluster.Pods)
+	// Another isolation's "everything except X" policy on the same pods would
+	// re-admit what this one blocks, and ours would re-admit what it blocks:
+	// policies are OR'd, so both would stop working. force cannot fix that.
+	if other := otherIsolations(conflicts); len(other) > 0 {
+		return CreateResult{}, &Error{Status: http.StatusConflict, Code: "isolation_overlap",
+			Message: fmt.Sprintf("these pods are already in isolation %s; two isolations on the same pods cancel each other, "+
+				"so this cannot be forced; delete the existing isolation first", strings.Join(other, ", ")),
+			Details: map[string]any{"policies": conflicts, "isolations": other}}
+	}
 	forced := len(conflicts) > 0
 	if forced && !req.Force {
 		return CreateResult{}, conflictError(conflicts)
 	}
 	for _, c := range conflicts {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("forced past conflicting policy %s (side %s); it is still in effect and policies are additive", c.Policy, c.Side))
+	}
+	// A side that selects no running pod is most likely a typo. Warn rather
+	// than refuse: a side may be scaled to zero on purpose, and the policies
+	// still apply to matching pods created later.
+	for _, sd := range []struct {
+		name string
+		side Side
+	}{{"a", *n.Isolate.A}, {"b", *n.Isolate.B}} {
+		if countRunning(sd.side, cluster.Pods) == 0 {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("side %s matches 0 running pods in %s; check the selector: nothing is isolated until a matching pod exists",
+				sd.name, strings.Join(sd.side.Namespaces, ",")))
+		}
 	}
 
 	if forced {
@@ -127,6 +148,38 @@ func (s *Service) Create(ctx context.Context, req Request) (CreateResult, error)
 			Details: map[string]any{"created": res.Created, "repaired": res.Repaired, "failed": failed}}
 	}
 	return res, nil
+}
+
+// otherIsolations returns the sorted, unique IDs of other isolations among
+// the conflicts.
+func otherIsolations(conflicts []Conflict) []string {
+	var ids []string
+	for _, c := range conflicts {
+		if c.IsolationID != "" {
+			ids = append(ids, c.IsolationID)
+		}
+	}
+	slices.Sort(ids)
+	return slices.Compact(ids)
+}
+
+// countRunning counts the pods of a side that are not finished. The selector
+// was validated, so a conversion error cannot happen; it counts as no match.
+func countRunning(side Side, pods []corev1.Pod) int {
+	sel, err := metav1.LabelSelectorAsSelector(labelSelector(side))
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, p := range pods {
+		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		if slices.Contains(side.Namespaces, p.Namespace) && sel.Matches(labels.Set(p.Labels)) {
+			n++
+		}
+	}
+	return n
 }
 
 // createOrRepair writes d when it is missing or differs from cur, and returns
@@ -225,7 +278,7 @@ func (s *Service) snapshot(ctx context.Context, namespaces []string) (Cluster, [
 }
 
 // checkName returns 409 name_conflict when a named request reuses the name
-// of an isolation with a different identity (SPEC §6.2). Generated IDs are a
+// of an isolation with a different identity. Generated IDs are a
 // hash of the isolate block, so a difference there (allowEmptySelector only)
 // is drift that Create repairs.
 func (s *Service) checkName(ctx context.Context, n Request, id string) error {
@@ -249,7 +302,7 @@ func (s *Service) checkName(ctx context.Context, n Request, id string) error {
 
 // listManaged lists, in all namespaces, the policies that carry both the
 // managed-by label and isolation id. These two labels are the only way the
-// tool decides an object is its own (SPEC §5.1). An id that is not a valid
+// tool decides an object is its own. An id that is not a valid
 // label value cannot be on any policy, so it matches nothing.
 func (s *Service) listManaged(ctx context.Context, id string) ([]networkingv1.NetworkPolicy, error) {
 	sel, err := labels.ValidatedSelectorFromSet(labels.Set{LabelManagedBy: ManagedByValue, LabelIsolationID: id})
@@ -293,7 +346,7 @@ type DeleteResult struct {
 
 // Delete removes every policy carrying the managed-by label and this
 // isolation ID, found by label in all namespaces, so it needs nothing from
-// memory and works after a restart (FR-ISO-07). Each delete carries the
+// memory and works after a restart. Each delete carries the
 // listed object's UID as a precondition: if the object was replaced between
 // list and delete, the API server refuses instead of deleting the new one.
 // Deleting an unknown ID succeeds with an empty list.
@@ -328,7 +381,10 @@ func (s *Service) Delete(ctx context.Context, id string) (DeleteResult, error) {
 	}
 	s.refreshActive(ctx)
 	if len(failed) > 0 {
-		return DeleteResult{}, fmt.Errorf("delete isolation %s: deleted %v, failed %v", id, res.Deleted, failed)
+		return DeleteResult{}, &Error{Status: http.StatusInternalServerError, Code: "partial_delete",
+			Message: fmt.Sprintf("isolation %s: %d of %d policies could not be deleted (%s) and are still in effect; retry the same DELETE",
+				id, len(failed), len(policies), strings.Join(failed, "; ")),
+			Details: map[string]any{"id": id, "deleted": res.Deleted, "failed": failed}}
 	}
 	if len(res.Deleted) == 0 {
 		res.Message = fmt.Sprintf("no policies carry isolation ID %s; nothing to delete", id)
@@ -336,7 +392,7 @@ func (s *Service) Delete(ctx context.Context, id string) (DeleteResult, error) {
 	return res, nil
 }
 
-// Status is one isolation as read back from the cluster (FR-ISO-08).
+// Status is one isolation as read back from the cluster.
 type Status struct {
 	ID               string         `json:"id"`
 	Request          *Request       `json:"request"` // nil when the annotation is unreadable

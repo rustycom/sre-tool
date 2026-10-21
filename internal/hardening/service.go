@@ -19,12 +19,12 @@ import (
 	"k8s.io/client-go/tools/events"
 )
 
-// Waiter waits for a workload's rollout after a patch (SPEC §7.8).
+// Waiter waits for a workload's rollout after a patch.
 type Waiter interface {
 	Wait(ctx context.Context, kind, ns, name string, since time.Time) error
 }
 
-// Observer records hardening metrics (SPEC §9).
+// Observer records hardening metrics.
 type Observer interface {
 	ObserveWorkload(action, result string)
 	ObserveRollout(kind, result string, d time.Duration)
@@ -49,7 +49,7 @@ const (
 	StatusDryRun       = "dry_run" // undo with dryRun: true; nothing was written
 )
 
-// ApplyResult is the response of POST /v1/hardening/apply (SPEC §7.7). A
+// ApplyResult is the response of POST /v1/hardening/apply. A
 // halted apply is still a 200: the outcome is data, not an error.
 type ApplyResult struct {
 	Outcome string   `json:"outcome"`          // complete | halted
@@ -81,9 +81,9 @@ type Service struct {
 	obs       Observer
 	set       Settings
 
-	// applying makes apply single-flight (SPEC §7.7). A second caller gets a
+	// applying makes apply single-flight. A second caller gets a
 	// 409 rather than waiting, because an apply can take minutes. It is per
-	// process, which is why the tool runs one replica (ADR-012).
+	// process, which is why the tool runs one replica.
 	applying sync.Mutex
 }
 
@@ -92,7 +92,7 @@ func NewService(client kubernetes.Interface, v Validator, w Waiter, recorder eve
 	return &Service{client: client, validator: v, waiter: w, recorder: recorder, obs: obs, set: set}
 }
 
-// Plan returns what apply would do, without changing anything (SPEC §7.4):
+// Plan returns what apply would do, without changing anything:
 // the only writes are server-side dry-runs.
 func (s *Service) Plan(ctx context.Context, namespaces []string) (Plan, error) {
 	plan, _, err := s.plan(ctx, namespaces)
@@ -122,7 +122,7 @@ func replan(reason string) *halt {
 	return &halt{reason: reason, remedy: "plan again and apply the new planHash; workloads already hardened show as none"}
 }
 
-// Apply applies a reviewed plan one workload at a time (SPEC §7.7). It never
+// Apply applies a reviewed plan one workload at a time. It never
 // reverts: on a failure it stops, so at most one workload is in a bad state,
 // and the remedy says how to roll that one back.
 func (s *Service) Apply(ctx context.Context, namespaces []string, planHash string) (ApplyResult, error) {
@@ -172,7 +172,7 @@ func inProgress() *Error {
 		Message: "another apply or undo is running; wait for it to finish, then try again"}
 }
 
-// applyOne runs the per-workload steps of SPEC §7.7 and fills r. It returns
+// applyOne runs the per-workload apply steps and fills r. It returns
 // non-nil when apply must stop.
 func (s *Service) applyOne(ctx context.Context, w Workload, in Input, start time.Time, r *Result) *halt {
 	if h := s.beforeNext(ctx, start, r); h != nil {
@@ -207,7 +207,7 @@ func (s *Service) applyOne(ctx context.Context, w Workload, in Input, start time
 	r.Status, r.Message = StatusFailed, "apply: "+err.Error()
 	s.event(obj, corev1.EventTypeWarning, "HardeningFailed", r.Message)
 	if apierrors.IsConflict(err) {
-		// Another manager owns a field with a different value (I-16): we do
+		// Another manager owns a field with a different value: we do
 		// not take it over.
 		return &halt{reason: "field_conflict", remedy: "another field manager owns one of these fields; resolve it with that owner, then plan again"}
 	}
@@ -251,7 +251,7 @@ func (s *Service) gate(ctx context.Context, w Workload, obj runtime.Object, sinc
 	if err != nil {
 		r.Status, r.Message = StatusFailed, "rollout: "+err.Error()
 		s.event(obj, corev1.EventTypeWarning, "HardeningFailed", r.Message)
-		// No automatic revert (ADR-008): the old pods keep serving under the
+		// No automatic revert: the old pods keep serving under the
 		// rolling update, and the operator decides.
 		return &halt{reason: "rollout_failed",
 			remedy: fmt.Sprintf("kubectl -n %s rollout undo %s/%s", w.Namespace, strings.ToLower(w.Kind), w.Name)}

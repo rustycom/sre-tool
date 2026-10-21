@@ -1,4 +1,4 @@
-# The brief's example request, verbatim. The API MUST accept this exactly (SPEC FR-ISO-01).
+# The brief's example request, verbatim. The API MUST accept this exactly.
 isolate:
   a:
     namespace: tenant-a

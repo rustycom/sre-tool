@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hardening e2e (TESTING §3.2): plan, apply, idempotency, stale plan, the strict-failure
+# Hardening e2e: plan, apply, idempotency, stale plan, the strict-failure
 # demo and undo against the real API server, where dry-run, SSA and rollouts actually happen.
 # Needs: make cluster-up image kind-load deploy. It recreates the two demo namespaces
 # first, because a previous run leaves them hardened and plan would then find nothing.
@@ -90,7 +90,7 @@ poll_until 20 curl -sf -o /dev/null "http://127.0.0.1:${PF_PORT}/v1/isolations" 
 
 echo "Stage 1: plan"
 expect_status 200 "$(post /v1/hardening/plan "$BODY")" "plan $DEMO $LR"
-check "summary is SPEC §7.4 plus lr-app" '.summary == {"patch": 9, "none": 1, "report": 2, "skip": 1}'
+check "summary matches the demo plan plus lr-app" '.summary == {"patch": 9, "none": 1, "report": 2, "skip": 1}'
 check "actions per workload" '[.workloads[] | "\(.name)=\(.action)"] | sort == ([
   "safe-app=patch", "root-nginx=patch", "privileged-app=patch", "limits-only=patch", "already-hardened=none",
   "skipped-app=skip", "hpa-app=patch", "stateful-app=patch", "node-agent=patch", "nightly=patch",
@@ -178,12 +178,12 @@ check "the reason names non-root or CreateContainerConfigError" 'r("root-nginx")
 echo "  gate failed after $((SECONDS - start))s: $(jq -r '.results[] | select(.name == "root-nginx") | .message' "$TMP/body")"
 echo "  remedy: $(jq -r .remedy "$TMP/body")"
 # The strict template keeps what the first apply set: SSA drops owned fields a later apply
-# leaves out (I-17), so each patch starts from the fields sre-tool owns (ADR-019).
+# leaves out, so each patch starts from the fields sre-tool owns.
 expect_field deploy/root-nginx '{.spec.template.spec.containers[0].securityContext.runAsNonRoot}' true
 expect_field deploy/root-nginx '{.spec.template.spec.securityContext.seccompProfile.type}' RuntimeDefault
 expect_field deploy/root-nginx '{.spec.template.spec.containers[0].resources.requests.cpu}' 100m
 expect_field deploy/root-nginx '{.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation}' false
-# The old ReplicaSet's pods keep serving: with 2 replicas, maxUnavailable rounds down to 0 (I-20).
+# The old ReplicaSet's pods keep serving: with 2 replicas, maxUnavailable rounds down to 0.
 expect_field deploy/root-nginx '{.status.availableReplicas}' 2
 got=$(probe_result $DEMO app=safe-app root-nginx.$DEMO:80)
 [[ $got == ok ]] || die "root-nginx Service does not answer during the failed rollout: $got"
@@ -196,7 +196,7 @@ check "back to zero patch actions" '.summary.patch == 0'
 
 echo "Stage 6: undo"
 # A human changes one field sre-tool set. kubectl's update takes ownership of the changed
-# field (I-16), so undo, which releases only what sre-tool still owns, must keep it.
+# field, so undo, which releases only what sre-tool still owns, must keep it.
 "${KUBECTL[@]}" -n $DEMO set resources deploy/safe-app --requests=cpu=200m >/dev/null
 "${KUBECTL[@]}" -n $DEMO rollout status deploy/safe-app --timeout=180s >/dev/null
 UNDO="{\"namespaces\":[\"$DEMO\",\"$LR\"]"
