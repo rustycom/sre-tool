@@ -12,7 +12,7 @@ import (
 )
 
 // Conflict is an existing policy that already selects a side's pods for
-// ingress, so the isolation could not mean what it says (FR-ISO-04).
+// ingress, so the isolation could not mean what it says.
 type Conflict struct {
 	Policy      string `json:"policy"` // namespace/name
 	Side        string `json:"side"`
@@ -21,10 +21,10 @@ type Conflict struct {
 
 // Preflight returns the policies that conflict with the isolation id.
 // policies and pods cover the namespaces of both sides. Policies are additive
-// allow-lists (I-1): an existing ingress policy on a side either already
+// allow-lists: an existing ingress policy on a side either already
 // admits the other side, which the new policy cannot take away, or restricts
 // the side, which the new "everything except the other side" policy would
-// widen. Only pods that exist now are considered (SPEC §6.4).
+// widen. Only pods that exist now are considered.
 func Preflight(normalized Request, id string, policies []networkingv1.NetworkPolicy, pods []corev1.Pod) []Conflict {
 	var conflicts []Conflict
 	for _, s := range []struct {

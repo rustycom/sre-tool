@@ -1,4 +1,4 @@
-# CI runs the same make targets as a local run (docs/VERSIONS.md lists every pin).
+# CI runs the same make targets as a local run.
 # Actions are pinned by commit SHA: a tag can be moved to other code, a SHA cannot.
 name: ci
 
@@ -22,7 +22,7 @@ jobs:
       - run: make ci
 
   # Unit tests use a fake clientset that ignores NetworkPolicy enforcement, dry-run and
-  # rollouts (FINDINGS A7); only a real cluster with a real CNI proves those.
+  # rollouts; only a real cluster with a real CNI proves those.
   e2e:
     needs: verify
     runs-on: ubuntu-24.04

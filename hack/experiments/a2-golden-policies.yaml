@@ -1,4 +1,4 @@
-# A2, A3, A4, A5, A6: a hand-written copy of the SPEC §6.5 golden policy for the brief's
+# A2, A3, A4, A5, A6: a hand-written copy of the golden policy in internal/isolation/testdata for the brief's
 # request (tenant-a/app=gateway <-> tenant-b/app=dashboard), both sides. Labels and
 # annotations are trimmed: only the spec matters to the CNI.
 apiVersion: networking.k8s.io/v1

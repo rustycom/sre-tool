@@ -33,17 +33,17 @@ type candidate struct {
 	kind   string
 	meta   metav1.ObjectMeta
 	spec   corev1.PodSpec // what the rules look at
-	hashed any            // what the template hash covers (SPEC §7.5)
+	hashed any            // what the template hash covers
 	report string         // non-empty: report only, for this reason
 	impact string         // rollout impact if patched
 }
 
-// kindRank is the kind sort order of SPEC §7.4.
+// kindRank is the kind sort order of the plan.
 func kindRank(kind string) int {
 	return slices.Index([]string{"CronJob", "Deployment", "StatefulSet", "DaemonSet", "Job", "Pod"}, kind)
 }
 
-// BuildPlan is the pure planner (SPEC §7.4): same input, same plan.
+// BuildPlan is the pure planner: same input, same plan.
 func BuildPlan(in Input, d Defaults) Plan {
 	skippedNS := map[string]bool{}
 	var namespaces []string
@@ -66,7 +66,7 @@ func BuildPlan(in Input, d Defaults) Plan {
 		case c.meta.Annotations[SkipAnnotation] == "true":
 			w.Action, w.Reason = ActionSkip, "annotated "+SkipAnnotation
 		case owner != nil:
-			// The owning controller would revert a patch (ADR-009).
+			// The owning controller would revert a patch.
 			w.Action, w.Reason = ActionReport, fmt.Sprintf("managed by %s/%s", owner.Kind, owner.Name)
 		case c.report != "":
 			w.Action, w.Reason = ActionReport, c.report
@@ -106,7 +106,7 @@ func BuildPlan(in Input, d Defaults) Plan {
 	return plan
 }
 
-// candidates applies the kind dispatch of SPEC §7.1. ReplicaSets are never
+// candidates applies the kind dispatch. ReplicaSets are never
 // in the input; Jobs created by a CronJob and Pods created by any controller
 // are not listed, because their owner is the unit (and CronJob Jobs come and
 // go, which would change the plan hash on every run).
@@ -188,7 +188,7 @@ func coveredBy(lrs []corev1.LimitRange, ns string) map[corev1.ResourceName]strin
 
 // hpaWarnings warns when an HPA scales the workload on utilisation of a
 // resource whose request the plan adds: utilisation is measured against the
-// request, so the HPA starts acting (ADR-007).
+// request, so the HPA starts acting.
 func hpaWarnings(hpas []autoscalingv2.HorizontalPodAutoscaler, c candidate, changes []Change) []Finding {
 	added := map[corev1.ResourceName]bool{}
 	for _, ch := range changes {

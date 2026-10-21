@@ -1,4 +1,4 @@
-# Hardening demo (SPEC §12). One workload per planner behaviour; the comment above each
+# Hardening demo. One workload per planner behaviour; the comment above each
 # names the action the planner is expected to produce.
 apiVersion: v1
 kind: Namespace

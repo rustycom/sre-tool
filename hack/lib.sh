@@ -8,7 +8,7 @@ KUBECONFIG_FILE="${KUBECONFIG_FILE:-${HACK_ROOT}/.kube/kind-sre-tool.kubeconfig}
 KUBECTL=(kubectl --kubeconfig "${KUBECONFIG_FILE}" --context "${KCTX}")
 HELM=(helm --kubeconfig "${KUBECONFIG_FILE}" --kube-context "${KCTX}")
 
-# --- Helpers for the e2e scripts (SPEC §13.2). ---
+# --- Helpers for the e2e scripts. ---
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -20,7 +20,7 @@ require_context() {
 
 # probe_result <ns> <selector|pod/NAME> <host:port|dns:NAME>: prints ok, blocked or
 # "error: …". blocked means a timeout, which is what a dropping NetworkPolicy looks like;
-# refused, DNS and exec failures are errors, never mistaken for enforcement (FINDINGS notes).
+# refused, DNS and exec failures are errors, never mistaken for enforcement.
 probe_result() {
   local pod=$2 out
   if [[ $pod != pod/* ]]; then

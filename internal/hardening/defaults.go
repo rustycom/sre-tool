@@ -6,7 +6,7 @@ import (
 	"github.com/rustycom/sre-tool/internal/config"
 )
 
-// Defaults are the values rules R1–R3 fill in (ADR-007). There is no CPU
+// Defaults are the values rules R1–R3 fill in. There is no CPU
 // limit on purpose.
 type Defaults struct {
 	CPURequest    resource.Quantity

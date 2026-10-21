@@ -1,5 +1,5 @@
 // Package isolation turns an isolation request into the NetworkPolicies that
-// cut network traffic between two sets of pods (SPEC §6).
+// cut network traffic between two sets of pods.
 package isolation
 
 import (
@@ -16,7 +16,7 @@ const (
 	maxNamespacesLen = 10
 )
 
-// Request is the body of POST /v1/isolations (SPEC §6.1).
+// Request is the body of POST /v1/isolations.
 type Request struct {
 	Name               string `json:"name,omitempty"`
 	Force              bool   `json:"force,omitempty"`
@@ -38,8 +38,8 @@ type Side struct {
 	MatchExpressions []metav1.LabelSelectorRequirement `json:"matchExpressions,omitempty"`
 }
 
-// Error is a request failure carrying the HTTP status and error code from
-// SPEC §6.3 and §8, so the HTTP layer can map it without string matching.
+// Error is a request failure carrying the HTTP status and error code,
+// so the HTTP layer can map it without string matching.
 type Error struct {
 	Status  int
 	Code    string
@@ -55,7 +55,7 @@ func invalid(format string, args ...any) *Error {
 
 // Decode parses a JSON or YAML body strictly and validates it. sigs.k8s.io/yaml
 // converts YAML to JSON first, and JSON is valid YAML, so one path serves both
-// content types. Strict mode rejects unknown and duplicate fields (FR-ISO-01).
+// content types. Strict mode rejects unknown and duplicate fields.
 func Decode(body []byte) (Request, error) {
 	var req Request
 	if err := yaml.UnmarshalStrict(body, &req); err != nil {
@@ -67,7 +67,7 @@ func Decode(body []byte) (Request, error) {
 	return req, nil
 }
 
-// Validate applies the static 400 rules of FR-ISO-03. It needs no cluster access.
+// Validate applies the static 400 rules. It needs no cluster access.
 func Validate(req Request) error {
 	if req.Name != "" {
 		if len(req.Name) > maxNameLen {

@@ -10,7 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// briefYAML is the brief's example, verbatim (SPEC §6.1).
+// briefYAML is the brief's example, verbatim.
 const briefYAML = `isolate:
   a:
     namespace: tenant-a

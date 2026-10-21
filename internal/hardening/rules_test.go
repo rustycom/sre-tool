@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// testDefaults are the SPEC §4 defaults.
+// testDefaults are the default flag values.
 var testDefaults = Defaults{
 	CPURequest:    resource.MustParse("100m"),
 	MemoryRequest: resource.MustParse("128Mi"),
@@ -257,7 +257,7 @@ func TestRules_LimitWithoutRequestLeavesRequestAlone(t *testing.T) {
 			}
 		})
 	}
-	// limits-only (SPEC §12): the 64Mi limit stays, and the CPU request is still added.
+	// limits-only: the 64Mi limit stays, and the CPU request is still added.
 	r := templateRules(specWith(resources("limits.memory=64Mi")), ruleContext{defaults: testDefaults})
 	if _, ok := changeTo(r, FieldMemoryLimit); ok {
 		t.Errorf("existing memory limit changed: %v", changed(r))

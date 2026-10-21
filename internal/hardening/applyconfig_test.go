@@ -71,7 +71,7 @@ func TestApplyConfig_OnlyPlannedFieldsAndKeys(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Anything beyond the planned fields and the container names would
-			// make sre-tool own it, or overwrite it (I-15).
+			// make sre-tool own it, or overwrite it.
 			if !reflect.DeepEqual(g, w) {
 				t.Errorf("apply config =\n%s\nwant\n%s", got, want)
 			}
@@ -93,7 +93,7 @@ func TestApplyConfig_OnlyPlannedFieldsAndKeys(t *testing.T) {
 	}
 }
 
-// The fake clientset merges an apply like the API server does (FINDINGS A7),
+// The fake clientset merges an apply like the API server does,
 // so this shows a partial config keeps every field it does not name.
 func TestPatch_SendMergesByContainerName(t *testing.T) {
 	d := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "w"},
@@ -129,7 +129,7 @@ func TestPatch_SendMergesByContainerName(t *testing.T) {
 }
 
 // A later apply must keep what earlier applies set. SSA removes fields the
-// manager owned and no longer sends (I-17), so a patch that held only the
+// manager owned and no longer sends, so a patch that held only the
 // new changes would strip earlier hardening, e.g. moving to strict would
 // drop seccomp and the resource defaults.
 func TestPatch_KeepsFieldsAppliedBefore(t *testing.T) {

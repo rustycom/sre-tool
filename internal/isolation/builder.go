@@ -8,7 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Labels and annotations on every policy the tool creates (SPEC §5.1).
+// Labels and annotations on every policy the tool creates.
 const (
 	LabelManagedBy           = "app.kubernetes.io/managed-by"
 	ManagedByValue           = "sre-tool"
@@ -20,10 +20,10 @@ const (
 )
 
 // BuildPolicies returns one ingress-only NetworkPolicy per (side, namespace)
-// for a normalised request (FR-ISO-05). Each policy selects its side's pods
+// for a normalised request. Each policy selects its side's pods
 // and admits everything except the other side. Ingress on both sides is
 // enough to stop new connections in both directions, and leaving egress alone
-// keeps DNS working (ADR-003). The output order is deterministic: side a's
+// keeps DNS working. The output order is deterministic: side a's
 // namespaces, then side b's, each sorted.
 func BuildPolicies(normalized Request, id string, podCIDRs []string) []networkingv1.NetworkPolicy {
 	a, b := *normalized.Isolate.A, *normalized.Isolate.B
@@ -62,8 +62,8 @@ func BuildPolicies(normalized Request, id string, podCIDRs []string) []networkin
 	return policies
 }
 
-// peersExcluding admits every source except the pods of side y, in the order
-// SPEC §6.5 fixes: pods outside y's namespaces, then the complement of y's
+// peersExcluding admits every source except the pods of side y, in a fixed
+// order: pods outside y's namespaces, then the complement of y's
 // selector inside each of them, then non-pod traffic. An empty y selector
 // yields no complement peers, so y's namespaces are blocked entirely.
 func peersExcluding(y Side, podCIDRs []string) []networkingv1.NetworkPolicyPeer {
@@ -76,7 +76,7 @@ func peersExcluding(y Side, podCIDRs []string) []networkingv1.NetworkPolicyPeer 
 		peers = append(peers, ComplementPeers(ns, y)...)
 	}
 	// The except keeps a CNI that matches ipBlocks against pod IPs from
-	// re-admitting y through this peer (I-6, FINDINGS A2).
+	// re-admitting y through this peer.
 	return append(peers, networkingv1.NetworkPolicyPeer{
 		IPBlock: &networkingv1.IPBlock{CIDR: "0.0.0.0/0", Except: slices.Clone(podCIDRs)},
 	})

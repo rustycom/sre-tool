@@ -1,4 +1,4 @@
-# A3 / CR-15 probe: an extra, additive policy admitting the kind node network (172.18.0.0/16)
+# A3 follow-up probe: an extra, additive policy admitting the kind node network (172.18.0.0/16)
 # to side a. Tested with and without Cilium's policyCIDRMatchMode=nodes.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

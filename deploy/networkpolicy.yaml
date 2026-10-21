@@ -1,5 +1,5 @@
 # Ingress only on the ops port. Port-forward to the loopback API does not pass through the
-# CNI, so this policy does not affect it (FINDINGS A9).
+# CNI, so this policy does not affect it.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

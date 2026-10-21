@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Error is a request error with its HTTP status and SPEC §8 code.
+// Error is a request error with its HTTP status and error code.
 type Error struct {
 	Status  int
 	Code    string
@@ -50,7 +50,7 @@ func Decode(body []byte) (Request, error) {
 	return r, nil
 }
 
-// UndoRequest is the body of undo (SPEC §7.9).
+// UndoRequest is the body of undo.
 type UndoRequest struct {
 	Namespaces []string `json:"namespaces"`
 	DryRun     bool     `json:"dryRun,omitempty"`
@@ -85,7 +85,7 @@ func cleanNamespaces(namespaces []string) ([]string, error) {
 	return namespaces, nil
 }
 
-// Collect checks the namespaces (403 protected, 422 missing; SPEC §7.2) and
+// Collect checks the namespaces (403 protected, 422 missing) and
 // lists everything the planner looks at in them. Protected namespaces are
 // refused before any read, so the tool never even lists their workloads.
 func Collect(ctx context.Context, c kubernetes.Interface, namespaces []string, protected map[string]bool) (Input, error) {

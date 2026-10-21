@@ -286,8 +286,8 @@ func TestPlanner_HPAWarning(t *testing.T) {
 	}
 }
 
-// TestPlanner_DemoGolden pins the whole plan for the SPEC §12 workloads.
-// The golden file was reviewed by hand against the SPEC §12 table.
+// TestPlanner_DemoGolden pins the whole plan for the demo workloads.
+// The golden file was reviewed by hand against examples/workloads/hardening-demo.yaml.
 // Regenerate with -update and review the diff.
 func TestPlanner_DemoGolden(t *testing.T) {
 	got, err := json.MarshalIndent(BuildPlan(demoInput(t), testDefaults), "", "  ")
@@ -310,7 +310,7 @@ func TestPlanner_DemoGolden(t *testing.T) {
 	}
 }
 
-// SPEC §10.3: the tool must pass its own hardening.
+// The tool must pass its own hardening.
 func TestPlanner_ToolOwnDeploymentIsCompliant(t *testing.T) {
 	in := loadInput(t, "../../deploy/deployment.yaml")
 	if len(in.Deployments) != 1 {
@@ -396,7 +396,7 @@ func containerByName(spec *corev1.PodSpec, name string) *corev1.Container {
 // TestPlan_SecondPassIsEmpty is tricky test #3. Apply every planned change to
 // a copy of each demo workload, plan again, and require zero patch actions.
 // If a rule's condition does not see its own output as "set" (or wrote a
-// nondeterministic value), every apply would restart everything (I-9).
+// nondeterministic value), every apply would restart everything.
 func TestPlan_SecondPassIsEmpty(t *testing.T) {
 	in := demoInput(t)
 	// A strict copy of root-nginx, so X1-X3 changes converge too.

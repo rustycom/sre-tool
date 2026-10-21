@@ -209,7 +209,7 @@ func TestHandlers_HardeningRoutes(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"planHash":"sha256:p"`) || !reflect.DeepEqual(f.gotNS, []string{"a", "b"}) {
 		t.Errorf("plan: status %d, body %s, namespaces %v", rec.Code, rec.Body, f.gotNS)
 	}
-	// A halted apply is still a 200: the outcome is data (SPEC §7.7).
+	// A halted apply is still a 200: the outcome is data.
 	rec = do(h, "POST", "/v1/hardening/apply", `{"namespaces":["a"],"planHash":"sha256:abc"}`)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"outcome":"halted"`) || f.gotHash != "sha256:abc" {
 		t.Errorf("apply: status %d, body %s, hash %q", rec.Code, rec.Body, f.gotHash)

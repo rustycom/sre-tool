@@ -30,7 +30,7 @@ func (r *result) finding(container, rule, severity, message string) {
 	r.findings = append(r.findings, Finding{Container: container, Rule: rule, Severity: severity, Message: message})
 }
 
-// templateRules runs every rule on one pod spec (SPEC §7.3): pod-level rules
+// templateRules runs every rule on one pod spec: pod-level rules
 // first, then each init container and container in template order, so the
 // output is deterministic. Ephemeral containers are never touched: they are
 // added through their own subresource and cannot be set in a template.
@@ -38,7 +38,7 @@ func templateRules(spec *corev1.PodSpec, ctx ruleContext) result {
 	var r result
 	// API validation rejects seccomp, allowPrivilegeEscalation, capabilities
 	// and readOnlyRootFilesystem on Windows pods, so setting them would only
-	// make apply fail (ADR-018). Resources and runAsNonRoot are allowed.
+	// make apply fail. Resources and runAsNonRoot are allowed.
 	windows := spec.OS != nil && spec.OS.Name == corev1.Windows
 	if windows {
 		r.finding("", "WIN", "info", "Windows pod: seccomp, allowPrivilegeEscalation, capabilities and readOnlyRootFilesystem are not allowed, so S1, S2, X2 and X3 are skipped")
@@ -72,7 +72,7 @@ func templateRules(spec *corev1.PodSpec, ctx ruleContext) result {
 }
 
 // ruleS1 sets the pod-level seccomp profile when it is unset. A container-level
-// profile overrides the pod one (I-13), so it is left alone either way.
+// profile overrides the pod one, so it is left alone either way.
 func ruleS1(r *result, spec *corev1.PodSpec) {
 	if spec.SecurityContext == nil || spec.SecurityContext.SeccompProfile == nil {
 		r.change("", FieldSeccomp, string(corev1.SeccompProfileTypeRuntimeDefault))
@@ -97,7 +97,7 @@ func rulePrivileged(r *result, c *corev1.Container) {
 }
 
 // ruleS2 sets allowPrivilegeEscalation=false when it is unset, except where
-// API validation rejects that value: with privileged or CAP_SYS_ADMIN (I-12).
+// API validation rejects that value: with privileged or CAP_SYS_ADMIN.
 func ruleS2(r *result, c *corev1.Container) {
 	if c.SecurityContext != nil && c.SecurityContext.AllowPrivilegeEscalation != nil {
 		return
@@ -112,7 +112,7 @@ func ruleS2(r *result, c *corev1.Container) {
 
 // ruleRequest is R1 (cpu) and R2 (memory): set a default request only when
 // neither a request nor a limit exists. With a limit, admission already sets
-// the request to the limit (I-11); adding the default would lower it.
+// the request to the limit; adding the default would lower it.
 func ruleRequest(r *result, c *corev1.Container, res corev1.ResourceName, rule string, def resource.Quantity, field string, ctx ruleContext) {
 	if _, ok := c.Resources.Requests[res]; ok {
 		return
@@ -136,7 +136,7 @@ func ruleR3(r *result, c *corev1.Container, ctx ruleContext) {
 		return
 	}
 	if lr, ok := ctx.coveredBy[corev1.ResourceMemory]; ok {
-		// SPEC §7.3 skips R1–R3 for a resource the LimitRange defaults at all.
+		// R1–R3 are skipped for a resource the LimitRange defaults at all.
 		// It may set only defaultRequest, so this does not claim a limit is set.
 		r.finding(c.Name, "R3", "info", "memory limit left to LimitRange "+lr+", which defaults memory at admission")
 		return
@@ -152,7 +152,7 @@ func ruleR3(r *result, c *corev1.Container, ctx ruleContext) {
 	r.change(c.Name, FieldMemoryLimit, limit.String())
 }
 
-// ruleR4 never sets a CPU limit (ADR-007: throttling hurts more than it
+// ruleR4 never sets a CPU limit (throttling hurts more than it
 // protects); it only says so.
 func ruleR4(r *result, c *corev1.Container) {
 	if _, ok := c.Resources.Limits[corev1.ResourceCPU]; !ok {
@@ -160,9 +160,9 @@ func ruleR4(r *result, c *corev1.Container) {
 	}
 }
 
-// ruleX1 covers runAsNonRoot, which the kubelet checks only at container start
-// (I-14): an image that runs as root then fails, and no dry-run can tell.
-// Hence report by default and set only on the strict opt-in (ADR-006).
+// ruleX1 covers runAsNonRoot, which the kubelet checks only at container start:
+// an image that runs as root then fails, and no dry-run can tell.
+// Hence report by default and set only on the strict opt-in.
 func ruleX1(r *result, c *corev1.Container, spec *corev1.PodSpec, ctx ruleContext) {
 	if spec.SecurityContext != nil && spec.SecurityContext.RunAsNonRoot != nil {
 		return

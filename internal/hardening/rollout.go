@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// The evaluators mirror `kubectl rollout status` (SPEC §7.8, I-19): done only
+// The evaluators mirror `kubectl rollout status`: done only
 // when the controller has seen the new generation and the updated, ready and
 // total counts line up. An error means the rollout has failed for good.
 
@@ -74,7 +74,7 @@ func daemonSetDone(d *appsv1.DaemonSet) (bool, error) {
 // failFastReasons are container waiting reasons that will not fix themselves
 // within a rollout timeout, so waiting for the timeout only delays the halt.
 var failFastReasons = map[string]bool{
-	"CreateContainerConfigError": true, // e.g. runAsNonRoot on a root image (I-14)
+	"CreateContainerConfigError": true, // e.g. runAsNonRoot on a root image
 	"CrashLoopBackOff":           true,
 	"ImagePullBackOff":           true,
 	"ErrImagePull":               true,
@@ -154,7 +154,7 @@ func (w RolloutWaiter) check(ctx context.Context, kind, ns, name string) (bool, 
 }
 
 // failFast looks at the workload's pods created since the patch.
-// ponytail: "new" is judged by creationTimestamp against our clock, so clock
+// Limitation: "new" is judged by creationTimestamp against our clock, so clock
 // skew larger than a rollout makes fail-fast miss; the timeout still halts.
 // Matching the newest ReplicaSet or revision hash per kind would remove that.
 func (w RolloutWaiter) failFast(ctx context.Context, ns string, sel *metav1.LabelSelector, since time.Time) error {

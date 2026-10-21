@@ -30,7 +30,7 @@ func TestNegate_Table(t *testing.T) {
 	}
 }
 
-// TestComplement_MatchesExactlyNonMembers is tricky test #1 (TESTING §4). For
+// TestComplement_MatchesExactlyNonMembers is tricky test #1. For
 // every label set over a small universe, including sets that lack a key, a pod
 // must match some complement peer if and only if it does not match the side's
 // selector. The oracle is apimachinery's own selector matching, the code the

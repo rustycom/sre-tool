@@ -1,4 +1,4 @@
-# LimitRange demo (SPEC §12): memory defaults come from the LimitRange at admission,
+# LimitRange demo: memory defaults come from the LimitRange at admission,
 # so the planner must skip R2/R3 for lr-app and report "covered at admission".
 apiVersion: v1
 kind: Namespace

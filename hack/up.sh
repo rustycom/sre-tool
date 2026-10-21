@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source hack/lib.sh
 
-KIND_VERSION="v0.32.0" # docs/VERSIONS.md; the node image digest in kind-config.yaml is built for it
+KIND_VERSION="v0.32.0" # the node image digest in kind-config.yaml is built for it
 
 kind version | grep -q "kind ${KIND_VERSION} " ||
   echo "warning: kind ${KIND_VERSION} is pinned; local is: $(kind version)" >&2

@@ -1,4 +1,4 @@
-# Example access for operators (SPEC §10.1). Calling the API means port-forwarding to the
+# Example access for operators. Calling the API means port-forwarding to the
 # pod, so this Role is the authorisation boundary, and the Kubernetes audit log records
 # each port-forward. Bind your own group in place of sre-operators.
 apiVersion: rbac.authorization.k8s.io/v1

@@ -1,4 +1,4 @@
-# Isolation bystander (SPEC §12). Its traffic to and from A and B must be unaffected by isolation,
+# Isolation bystander. Its traffic to and from A and B must be unaffected by isolation,
 # and its pre-existing policy must survive restore untouched.
 apiVersion: v1
 kind: Namespace

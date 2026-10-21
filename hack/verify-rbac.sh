@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RBAC e2e (TESTING §3.3): the tool's ServiceAccount can do exactly what SPEC §10.2 grants,
+# RBAC e2e: the tool's ServiceAccount can do exactly what deploy/clusterrole.yaml grants,
 # and the dangerous neighbours are denied. --all-namespaces asks about every namespace at
 # once, which is what a ClusterRoleBinding grants.
 set -euo pipefail
@@ -31,7 +31,7 @@ check() {
 allow() { local r=$1 v; shift; for v in "$@"; do check yes "$v" "$r"; done; }
 
 require_context
-echo "Allowed (SPEC §10.2):"
+echo "Allowed:"
 allow networkpolicies.networking.k8s.io get list watch create update delete
 for r in deployments statefulsets daemonsets; do allow "$r.apps" get list watch patch; done
 allow replicasets.apps get list
@@ -54,7 +54,7 @@ check no patch replicasets.apps
 check no patch jobs.batch
 check no create rolebindings.rbac.authorization.k8s.io
 
-# The operator Role is the API's access boundary (SPEC §10.1).
+# The operator Role is the API's access boundary.
 OPERATOR=(-n sre-tool --as=e2e-operator --as-group=sre-operators)
 echo "Operator group sre-operators (namespace sre-tool):"
 check yes create pods/portforward "${OPERATOR[@]}"

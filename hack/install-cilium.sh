@@ -3,13 +3,13 @@
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"
 
-CILIUM_VERSION="1.20.2" # docs/VERSIONS.md
+CILIUM_VERSION="1.20.2"
 
 "${KUBECTL[@]}" cluster-info >/dev/null || { echo "context ${KCTX} is not reachable" >&2; exit 1; }
 
 "${HELM[@]}" repo add cilium https://helm.cilium.io/ --force-update >/dev/null
 # ipam.mode=kubernetes: pod IPs come from each node's podCIDR inside 10.244.0.0/16,
-# which is what the isolation ipBlock except list assumes (SPEC §6.5, §11).
+# which is what the isolation ipBlock except list assumes.
 "${HELM[@]}" upgrade --install cilium cilium/cilium \
   --version "${CILIUM_VERSION}" \
   --namespace kube-system \
