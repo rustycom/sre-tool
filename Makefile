@@ -23,7 +23,7 @@ WORKLOAD_NAMESPACES := tenant-a tenant-b tenant-c hardening-demo hardening-lr
 
 .DEFAULT_GOAL := help
 .PHONY: help build test tools lint verify vuln cluster-up cluster-down workloads \
-	image kind-load deploy undeploy port-forward run-local \
+	image kind-load deploy undeploy port-forward port-forward-ops run-local \
 	e2e e2e-isolation e2e-hardening e2e-rbac ci demo
 
 help: ## List targets
@@ -97,6 +97,9 @@ undeploy: ## Remove the tool (isolation policies stay in their namespaces)
 port-forward: ## Expose the tool's API on localhost:8080
 	$(KUBECTL) -n sre-tool port-forward deploy/sre-tool 8080:8080
 
+port-forward-ops: ## Expose the tool's health and metrics port on localhost:8081
+	$(KUBECTL) -n sre-tool port-forward deploy/sre-tool 8081:8081
+
 e2e-isolation: ## Isolation connectivity matrix against kind (needs deploy)
 	hack/verify-isolation.sh
 
@@ -109,5 +112,4 @@ e2e-rbac: ## Check what the tool's ServiceAccount may and may not do
 run-local: ## Run the tool on this machine against the kind cluster (API on 127.0.0.1:8080)
 	go run ./cmd/sre-tool --kubeconfig $(KUBECONFIG_FILE) --kube-context $(KCTX)
 e2e: e2e-isolation e2e-hardening e2e-rbac ## All e2e scripts
-demo: ## (Phase 8)
-	@echo "$@: not implemented yet (Phase 8)"; exit 1
+demo: cluster-up workloads image kind-load deploy e2e ## From nothing to a verified demo: cluster, workloads, tool, every e2e
