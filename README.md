@@ -353,7 +353,15 @@ Each of the three was checked by breaking the code on purpose and watching it fa
 
 ## 10. Time taken and feedback on the brief
 
-**Time taken:** _AUTHOR: fill in the honest total and how it split across phases._ The design estimated about 7 hours for the core, above the brief's 4 to 6.
+**Time taken:** about 8 hours for the build, plus 2 hours on the second day
+
+- Design (spec, plan, ADRs, before the first commit): ~2 h
+- Phase 0, kind + Cilium and the CNI experiments that the isolation design depends on: ~1.75 h
+- Isolation (core, service, packaging, e2e): ~3 h, of which over 2 h went on debugging the e2e connectivity matrix
+- Hardening (planner, apply, rollout gate, undo) and CI: ~1.25 h
+- Second day: README, a Go toolchain bump for GO-2026-6809, and fixes from a self-review: 2 h
+
+Commits landed faster than I could have typed the code, because Claude Code drafted much of it (see §11). Most of my own time went into the design up front and into reading, testing and breaking what was generated. I went over the range mainly because of the CNI experiments and the end-to-end tests. I chose to spend that time rather than ship isolation I hadn't verified against a real CNI.
 
 **Feedback on the brief:**
 
