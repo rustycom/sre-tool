@@ -15,7 +15,7 @@ What I used and why: plain `client-go` (typed clients, typed server-side apply c
 
 | Tool | Version used | Notes |
 |---|---|---|
-| Go | 1.27.2 (`go.mod` minimum 1.27.0) | builder image `golang:1.27.2`, pinned by digest |
+| Go | 1.27.3 (`go.mod` minimum 1.27.0) | builder image `golang:1.27.3`, pinned by digest |
 | Docker | 20.10+ | builds the image and runs kind |
 | kind | v0.32.0 | node image `kindest/node:v1.36.1`, pinned by digest |
 | kubectl | v1.36.1 or newer (within skew) | |
