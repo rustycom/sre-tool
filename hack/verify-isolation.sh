@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Isolation e2e (TESTING §3.1): proves on a real CNI that isolation blocks exactly A<->B,
+# Isolation e2e: proves on a real CNI that isolation blocks exactly A<->B,
 # survives pod churn and a tool restart, and that DELETE restores the baseline.
 # Needs: make cluster-up workloads image kind-load deploy.
 set -euo pipefail
@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 source hack/lib.sh
 
 PF_PORT="${PF_PORT:-18080}"
-POLL_TIMEOUT=30 # FINDINGS A6: worst case 1.99s, so 30s is >15x headroom
+POLL_TIMEOUT=30 # measured enforcement latency: worst case 1.99s, so 30s is >15x headroom
 REQUEST=examples/requests/isolate-gateway-dashboard.yaml
 MANAGED=app.kubernetes.io/managed-by=sre-tool
 SANITY_NS=np-sanity # the namespace in hack/experiments/a1-np-sanity.yaml
@@ -27,7 +27,9 @@ TO=(dashboard.tenant-b:8080 gateway.tenant-a:8080 GATEWAY_POD_IP gateway.tenant-
   dashboard.tenant-b:8080 dashboard.tenant-b:8080 gateway.tenant-a:8080 client.tenant-c:8080
   dns:kubernetes.default.svc.cluster.local gateway.tenant-a:8080)
 DURING=(blocked blocked blocked ok ok ok ok ok ok ok)
-declare -A RESULT
+# One indexed array (bash 3.2 has no associative arrays): stage offset + row.
+RESULT=()
+stage_base() { case $1 in Before) echo 0 ;; During) echo 100 ;; After) echo 200 ;; esac; }
 
 start_pf() {
   "${KUBECTL[@]}" -n sre-tool port-forward deploy/sre-tool "${PF_PORT}:8080" >"$TMP/pf.log" 2>&1 &
@@ -55,7 +57,7 @@ check_matrix() {
     want=ok; [[ $1 != During ]] || want=${DURING[$i]}
     got=$(probe_result "${FROM_NS[$i]}" "${FROM_SEL[$i]}" "${TO[$i]}")
     if [[ $got != "$want" ]]; then got="$got (want $want)"; MISMATCHES=$((MISMATCHES + 1)); fi
-    RESULT[$1,$i]=$got
+    RESULT[$(($(stage_base "$1") + i))]=$got
   done
   echo "  $1 matrix probed"
 }
@@ -66,7 +68,7 @@ print_matrix() {
   row "#" "From" "To" "Before" "During" "After"
   for i in "${!TO[@]}"; do
     row $((i + 1)) "${FROM_NS[$i]}/${FROM_SEL[$i]#app=}" "${TO[$i]}" \
-      "${RESULT[Before,$i]:--}" "${RESULT[During,$i]:--}" "${RESULT[After,$i]:--}"
+      "${RESULT[i]:--}" "${RESULT[100 + i]:--}" "${RESULT[200 + i]:--}"
   done
   echo
 }
